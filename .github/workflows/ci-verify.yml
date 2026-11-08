@@ -1,0 +1,84 @@
+name: CI Verify
+
+# Full verification for a branch: guard checks, unit tests, and both manager flavors compiled.
+# Kept separate from Release APK so a fast red/green signal exists while iterating, and separate
+# from Build App because that one is master-oriented (it tags and publishes on every push).
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, arena/fd31deed-shizukuultra]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: "/usr/local/lib/android/sdk"
+      ANDROID_SDK_ROOT: "/usr/local/lib/android/sdk"
+      GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=1g"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      - name: Accept SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Pre-push guard
+        env:
+          SKIP_GRADLE_CHECK: '1'
+        run: |
+          chmod +x pre-push-guard/scripts/pre_push_check.sh
+          bash pre-push-guard/scripts/pre_push_check.sh
+
+      - name: Translation arrays
+        run: python3 scripts/i18n/check_arrays.py
+
+      - name: XML well-formedness
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET, sys
+          bad = []
+          for f in glob.glob('**/*.xml', recursive=True):
+              if '/build/' in f or f.startswith('api/') or f.startswith('_archive/'):
+                  continue
+              try:
+                  ET.parse(f)
+              except Exception as e:
+                  bad.append(f'{f}: {e}')
+          print('\n'.join(bad) if bad else 'all XML files parse')
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Unit tests
+        run: |
+          ./gradlew --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest \
+            :database:testDebugUnitTest --stacktrace
+
+      - name: Build debug APKs
+        run: |
+          ./gradlew :manager:assembleShizukuplusDebug :manager:assembleDropinDebug --stacktrace -x :manager:lint
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verify-test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+            **/build/reports/lint-results*
+          retention-days: 7

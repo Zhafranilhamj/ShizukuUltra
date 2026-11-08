@@ -24,7 +24,8 @@ on:
         required: false
         default: true
   push:
-    branches: [master]
+    # master publishes; other branches listed here only build artifacts (see the publish step).
+    branches: [master, arena/fd31deed-shizukuultra]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -171,7 +172,8 @@ jobs:
           retention-days: 30
 
       - name: Publish release
-        if: ${{ github.event_name == 'push' || github.event.inputs.attach_release == 'true' }}
+        # Only master publishes on push; a branch build produces artifacts for review.
+        if: ${{ (github.event_name == 'push' && github.ref_name == 'master') || github.event.inputs.attach_release == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
