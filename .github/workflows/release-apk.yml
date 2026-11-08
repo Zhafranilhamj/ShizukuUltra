@@ -120,26 +120,22 @@ jobs:
           set +e
           set -o pipefail
           # Job logs are served from external blob storage and cannot always be read back, so the
-          # failing part of a Gradle log is re-emitted as annotations. Only the block after
-          # "FAILURE:"/"What went wrong" (or the tail when there is none) is reported: GitHub caps
-          # the annotations per check run, and earlier versions spent that budget on unrelated
-          # lines, hiding the real error.
+          # failing part of a Gradle log is re-emitted as annotations: the 30 lines before the
+          # "FAILURE:"/"What went wrong" block (where compiler errors are) plus the block itself, or
+          # the tail when neither appears. GitHub caps the annotations per check run, so nothing
+          # else is emitted.
           report_gradle() {
             local f="$1" title="$2" start
-            # Compiler diagnostics (Kotlin "e: file:line", javac "error:") are the useful output and
-            # come before the FAILURE block, so prefer them when present.
-            local diag
-            diag=$(grep -nE '^(e|w): |^[^ ]*: (error|warning): |^error: ' "$f" | head -20)
-            if [ -n "$diag" ]; then
-              printf '%s\n' "$diag" | cut -d: -f2- | while IFS= read -r l; do echo "::error title=${title}::$l"; done
-              return
-            fi
+            # Compiler diagnostics ("e: file:line: ...", "error: ...") come *before* the FAILURE
+            # block, so report a window ending at FAILURE rather than starting there.
             start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
             if [ -n "$start" ]; then
-              sed -n "${start},$((start + 24))p" "$f"
+              from=$((start - 30)); [ "$from" -lt 1 ] && from=1
+              sed -n "${from},$((start + 10))p" "$f"
             else
-              tail -25 "$f"
-            fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+              tail -30 "$f"
+            fi | grep -vE '^\s+at |^\s*\.\.\. [0-9]+ (more|common frames)' \
+              | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
           # Retry only failures that are network flakiness in this step (a plugin/AAR that fails to
           # download once), so a real configuration error still fails immediately.
@@ -240,10 +236,10 @@ jobs:
           set +e
           set -o pipefail
           # Job logs are served from external blob storage and cannot always be read back, so the
-          # failing part of a Gradle log is re-emitted as annotations. Only the block after
-          # "FAILURE:"/"What went wrong" (or the tail when there is none) is reported: GitHub caps
-          # the annotations per check run, and earlier versions spent that budget on unrelated
-          # lines, hiding the real error.
+          # failing part of a Gradle log is re-emitted as annotations: the 30 lines before the
+          # "FAILURE:"/"What went wrong" block (where compiler errors are) plus the block itself, or
+          # the tail when neither appears. GitHub caps the annotations per check run, so nothing
+          # else is emitted.
           report_gradle() {
             local f="$1" title="$2" start
             start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
