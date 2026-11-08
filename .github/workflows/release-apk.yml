@@ -131,7 +131,7 @@ jobs:
             clean=$(mktemp)
             sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$f" > "$clean"
             local diag
-            diag=$(grep -nE 'e: |^error: |error: |Unresolved reference|Compilation error|Caused by: ' "$clean" | grep -vE '^\s+at ' | head -10)
+            diag=$(grep -nEi 'e: |error:|unresolved reference|caused by: ' "$clean" | grep -vE '^\s+at ' | head -10)
             if [ -n "$diag" ]; then
               printf '%s\n' "$diag" | cut -d: -f2- | while IFS= read -r l; do echo "::error title=${title}::$l"; done
               rm -f "$clean"
@@ -150,7 +150,7 @@ jobs:
           # Retry only failures that are network flakiness in this step (a plugin/AAR that fails to
           # download once), so a real configuration error still fails immediately.
           for attempt in 1 2 3 4; do
-            gradle help --stacktrace --no-daemon --console=plain 2>&1 | tee config.log
+            gradle help --stacktrace --no-daemon --console=plain -Pkotlin.compiler.execution.strategy=in-process 2>&1 | tee config.log
             rc=${PIPESTATUS[0]}
             if [ "$rc" -eq 0 ]; then
               break
@@ -260,7 +260,7 @@ jobs:
             fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
           gradle :manager:assembleShizukuplusRelease :manager:assembleDropinRelease \
-            :compat:assembleRelease --stacktrace --no-daemon --console=plain -x :manager:lint 2>&1 | tee build.log
+            :compat:assembleRelease --stacktrace --no-daemon --console=plain -Pkotlin.compiler.execution.strategy=in-process -x :manager:lint 2>&1 | tee build.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
             # Surface the failure through annotations and the job summary: the raw log is served
