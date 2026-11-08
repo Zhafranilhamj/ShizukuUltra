@@ -125,8 +125,8 @@ spotless {
 // removed, so `id "dev.rikka.tools.materialthemebuilder"` failed configuration outright with
 // "Extension of type 'BaseExtension' does not exist" - nothing in this module could be configured
 // or built. Its `materialThemeBuilder { ... }` block is now scripts/dev/palette/GenerateTheme.java,
-// which writes the same resources (md_theme_* colours, palette* attributes, the dynamic-colour
-// values-v31 themes and the accent overlays) from the same seed, and is run here into a generated
+// which writes the same resources (md_theme_* colours, palette* attributes and the dynamic-colour
+// values-v31 themes) from the same seed, and is run here into a generated
 // res directory that is part of the main source set. It needs nothing but the JDK: the colour
 // maths comes from material-color-utilities, vendored in scripts/dev/palette/mcu.
 def generatedThemeResDir = layout.buildDirectory.dir("generated/themeRes")

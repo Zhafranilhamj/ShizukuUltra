@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Kept for the --compare mode only. The accents themselves are now generated together with the rest
-# of the theme resources by scripts/dev/gen-theme-res.sh (scripts/dev/palette/GenerateTheme.java),
-# because that reads the vendored material-color-utilities (scripts/dev/palette/mcu) instead of
-# MDC's cached AAR classes.
+# Generates manager/src/main/res/values/themes_accents.xml: full Material 3 colour schemes for
+# every custom accent at Standard, Medium and High contrast, from MDC's bundled
+# material-color-utilities. Run after changing a seed in scripts/dev/palette/GenerateAccents.java.
 #
-# Usage: bash scripts/dev/gen-accent-palettes.sh --compare  # print seeds under each variant
+# Usage: bash scripts/dev/gen-accent-palettes.sh            # write the XML
+#        bash scripts/dev/gen-accent-palettes.sh --compare  # print seeds under each variant
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 

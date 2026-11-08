@@ -9,10 +9,12 @@
 #
 #   manager/build/generated/themeRes/values/values.xml
 #   manager/build/generated/themeRes/values-v31/values.xml
-#   manager/build/generated/themeRes/values/themes_accents.xml
 #
-# manager/build.gradle adds that directory to the main source set; the files are build output, not
-# checked in. Run this script by hand only to inspect the resources.
+# The accent overlays (values/themes_accents.xml) are committed resources, generated separately by
+# gen-accent-palettes.sh - emitting them here as well makes aapt2 fail with "Duplicate resources".
+#
+# manager/build.gradle runs this on every resource merge; the files are build output, not checked
+# in. Run it by hand only to inspect the resources.
 #
 # Usage: bash scripts/dev/gen-theme-res.sh [out-dir]
 set -euo pipefail
