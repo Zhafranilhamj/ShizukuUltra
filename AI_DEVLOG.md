@@ -120,6 +120,60 @@ Things discussed or sketched that we never formally decided to build.
 
 ## Session History (newest first)
 
+### 2026-11-08 — Arena Agent (AGP 9 migration: green CI + signed release APKs) [arena/fd31deed-shizukuultra]
+
+**Goal:** a release APK built by GitHub Actions. The sandbox that did the work has no Gradle/Maven
+network access and no JDK, so CI was the only compiler: every change below was diagnosed from
+check-run annotations, which is also why the reporting in the workflows was reworked first.
+
+**What was broken.** AGP 9.4 / Gradle 9.7 removed the interfaces that three plugins and two build
+scripts still used. In order:
+
+1. `settings.gradle` NPE'd on `props["api.useLocal"].equals("true")` when `local.properties` had only
+   `sdk.dir` — the null-safe call that replaced it does not compile in a settings script (no
+   safe-navigation extension methods), so the fix is plain null checks.
+2. `com.google.devtools.ksp` 2.3.6 aborts configuration if `ksp.useKSP2=false` is set (KSP1 is gone).
+3. `AutoResConfig` (locale list) and `dev.rikka.tools.materialthemebuilder` (theme resources) both
+   resolve AGP's removed `BaseExtension`; both are replaced in-repo.
+4. `android.applicationVariants`, `android.productFlavors` and `android.sdkDirectory` are gone:
+   variant work moved to `androidComponents { onVariants { } }` (registered at configuration time —
+   inside `afterEvaluate` it fails with "It is too late to add actions as the callbacks already
+   executed"), the SDK path comes from `androidComponents.sdkComponents.sdkDirectory`, and build
+   output from `layout.buildDirectory`.
+5. `:manager` did not compile at all: eight missing imports / wrong packages (documented by their own
+   commits).
+6. `:shell` wrote `rish_shizuku.dex` into `manager/src/main/assets`, which aapt2 now rejects as
+   `Duplicate resources` for the asset merge; the manager extracts it into
+   `build/generated/dexAssets/<buildType>` instead.
+7. The aapt2 resource-collapse task assumed AGP 8's intermediate layout; it now searches the variant
+   directory for `*.ap_`.
+
+**Replacement generators (both need only a JDK, no plugins):**
+- `scripts/i18n/generate_locales.py` → `ShizukuLocales.java` + `res/xml/locales_config.xml`, with
+  `--check` wired into all three workflows.
+- `scripts/dev/palette/GenerateTheme.java` (+ `scripts/dev/gen-theme-res.sh`, Gradle task
+  `:manager:generateThemeRes`) → the `md_theme_shizuku_*` colours, `palette*` attributes,
+  `Theme.Material3Expressive.{Light,Dark}.Shizuku` and the dynamic-colour overlays. Colour maths comes
+  from material-color-utilities, vendored under `scripts/dev/palette/mcu` (Apache 2.0). The accent
+  overlays stay as the committed `values/themes_accents.xml` — generating them too makes aapt2 fail
+  with `Duplicate resources`.
+
+**CI lessons worth keeping:**
+- Job logs are served from a blob host that this environment usually cannot read; check-run
+  *annotations* can be. The workflows therefore strip ANSI, find the `e: file:///...` lines, and emit
+  them **last-first** (GitHub keeps ~10 annotations per step, and the failing task is at the bottom).
+- `-Pkotlin.compiler.execution.strategy=in-process` is what makes Kotlin's diagnostics reach the log
+  at all — with the Build Tools API default, a compile failure only says "See log for more details".
+- services.gradle.org → GitHub release asset intermittently returns 504, so both workflows provision
+  the distribution themselves (`Provision Gradle`) instead of relying on the wrapper.
+- Groovy traps that cost a round trip each: `File[]` has no `isEmpty()`, `sort {}` returns a `List`,
+  `File.rename(String)` does not exist, and a `File` has no `toFile()`.
+
+**Result:** `CI Verify` green (guard, i18n, XML, 3 unit-test tasks, both debug flavors) and
+`Release APK` green — `shizukuplus-release-apks` contains the signed Plus, Drop-In and Compat Hub
+APKs. `release-apk.yml` now publishes on `workflow_dispatch` from any branch (it previously only
+published on master pushes).
+
 ### 2026-11-03 (cont'd) — Antigravity (Gemini 3.8 Flash) (Dependabot advisory audit, Bouncy Castle 1.86 upgrade, CI graph scoping & TLS fallback) [master]
 
 - **Dependabot Security Alerts & Root Cause Analysis:**
@@ -1796,6 +1850,9 @@ coordinator_root fix (carried to Apr 23).
 | ViewHolder `binding` param must be `private val` if used in member functions | Constructor params without `val`/`var` are inaccessible outside `init` — causes compile error |
 | Any edit to `database/src/main/assets/app_context_db.json` MUST bump `revision` | Installed apps ignore a download whose revision isn't higher than the one in use. Revision 1 is the first publish (2026-10-24 edits happened before it was ever on master); bumps start with the first edit after it's pushed. A pushed bump reaches every install within a day - don't bump for entries tied to unreleased features. Root-compat hub membership (`getRootLegacyPackages()`) is still hardcoded, so a remote update can change hub text but not add hub apps |
 | Serializer keeps in `database/consumer-rules.pro` MUST stay | Without them an R8 build parses the app database to nothing - silent, no crash |
+| Generated theme resources MUST stay in `manager/build/generated/themeRes` (not `src/main/res`) | `values/themes_accents.xml` is committed; generating it twice makes aapt2 fail with `Duplicate resources` |
+| `rish_shizuku.dex` MUST come from `build/generated/dexAssets/<buildType>` | Writing it into `manager/src/main/assets` from `:shell` breaks AGP 9's asset merge (`Duplicate resources`) and leaves a generated file in the source tree |
+| AGP variant work MUST use `androidComponents { onVariants { } }` registered at configuration time | `android.applicationVariants`/`productFlavors` are gone in AGP 9; registering callbacks in `afterEvaluate` fails with "It is too late to add actions" |
 | ~~`ksp.useKSP2=false` MUST stay in `gradle.properties`~~ **REVERSED 2026-11-08** | KSP 2.3.6 removed KSP1 entirely, so the flag now aborts Gradle configuration (`KSP1 is no longer available`). The flag must NOT be present; KSP2 + Room 2.6.1 builds and packages the release APK (verified on CI 2026-11-08). The old rule — KSP2 needs Room 2.7+, else `unexpected jvm signature V` — applied to KSP 2.2.20 only. Keep Room and KSP bumped together |
 
 ---
