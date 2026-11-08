@@ -1,0 +1,205 @@
+name: Release APK
+
+# Builds installable, R8-minified release APKs (Plus + Drop-In + Compat Hub) and publishes them,
+# for this fork and for anyone who needs a signed build out of a branch.
+#
+# Signing: with the KEYSTORE / KEYSTORE_PASSWORD / KEYSTORE_ALIAS / KEYSTORE_ALIAS_PASSWORD
+# secrets configured, the APKs are signed with the project's release key and can update an
+# installed Shizuku+ (af.shizuku.plus.api) or stock-Shizuku replacement (moe.shizuku.privileged.api)
+# in place. Without them, the run generates a throwaway keystore so the APKs are still installable
+# (a fresh install - Android will refuse to update an app signed with a different key), and says so
+# in the release notes and the job summary. signing.gradle refuses to build a release on CI without
+# *some* signing.properties, which is why the fallback exists here rather than being implicit.
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Prerelease'
+        type: boolean
+        required: false
+        default: true
+      attach_release:
+        description: 'Publish a GitHub release with the APKs attached'
+        type: boolean
+        required: false
+        default: true
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+permissions:
+  contents: write
+
+env:
+  ANDROID_HOME: "/usr/local/lib/android/sdk"
+  ANDROID_SDK_ROOT: "/usr/local/lib/android/sdk"
+  GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      signed_with: ${{ steps.keystore.outputs.signed_with }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      - name: Accept SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      # Static checks first: a malformed layout or a translated value array is a two-second failure
+      # here instead of a twenty-minute build failure later.
+      - name: Pre-push guard (static checks)
+        env:
+          SKIP_GRADLE_CHECK: '1'
+        run: |
+          chmod +x pre-push-guard/scripts/pre_push_check.sh
+          bash pre-push-guard/scripts/pre_push_check.sh
+
+      - name: Check translation arrays
+        run: python3 scripts/i18n/check_arrays.py
+
+      - name: Create signing.properties
+        id: keystore
+        env:
+          HAS_KEYSTORE: ${{ secrets.KEYSTORE != '' }}
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KS_ALIAS_PASS: ${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ "$HAS_KEYSTORE" = "true" ]; then
+            printf '%s' "$KEYSTORE" | base64 --decode > key.jks
+            store_pass="$KS_PASS"; alias_name="$KS_ALIAS"; alias_pass="$KS_ALIAS_PASS"
+            echo "signed_with=project release key" >> "$GITHUB_OUTPUT"
+          else
+            # Throwaway key: the APK installs, but cannot update a build signed with the real one.
+            keytool -genkeypair -noprompt -keystore key.jks -storepass "ci-throwaway" \
+              -alias "ci" -keypass "ci-throwaway" -keyalg RSA -keysize 4096 -validity 10000 \
+              -dname "CN=Shizuku+ CI, O=Shizuku+, C=US" > /dev/null 2>&1
+            store_pass="ci-throwaway"; alias_name="ci"; alias_pass="ci-throwaway"
+            echo "::warning::No KEYSTORE secret: signing with a throwaway key. The APK installs as a fresh app but cannot update an existing install."
+            echo "signed_with=throwaway CI key (no KEYSTORE secret)" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            printf 'KEYSTORE_PASSWORD=%s\n' "$store_pass"
+            printf 'KEYSTORE_ALIAS=%s\n' "$alias_name"
+            printf 'KEYSTORE_ALIAS_PASSWORD=%s\n' "$alias_pass"
+            printf 'KEYSTORE_FILE=%s\n' "$GITHUB_WORKSPACE/key.jks"
+          } > signing.properties
+
+      - name: Read version
+        id: version
+        run: |
+          set -euo pipefail
+          GIT_COUNT=$(git rev-list --count HEAD)
+          # Keep in sync with upstreamVersion in build.gradle.
+          UPSTREAM_VERSION=$(grep -oP 'def upstreamVersion = "\K[0-9.]+' build.gradle | head -1)
+          VERSION="${UPSTREAM_VERSION}.r${GIT_COUNT}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building ${VERSION}"
+
+      - name: Build release APKs
+        run: |
+          set -euo pipefail
+          ./gradlew :manager:assembleShizukuplusRelease :manager:assembleDropinRelease :compat:assembleRelease \
+            --stacktrace --no-daemon -x :manager:lint
+          ls -l manager/build/outputs/apk/*/release/ compat/build/outputs/apk/release/
+
+      - name: Collect APKs
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          pick() { # <flavor-dir> -> prints the first APK
+            find "$1" -name '*.apk' -type f | head -1
+          }
+          PLUS=$(pick manager/build/outputs/apk/shizukuplus/release)
+          DROPIN=$(pick manager/build/outputs/apk/dropin/release)
+          COMPAT=$(pick compat/build/outputs/apk/release)
+          [ -z "$PLUS" ] && { echo "::error::Plus APK missing"; exit 1; }
+          [ -z "$DROPIN" ] && { echo "::error::Drop-In APK missing"; exit 1; }
+          cp "$PLUS" "dist/ShizukuPlus-${VERSION}.apk"
+          cp "$DROPIN" "dist/ShizukuPlus-DropIn-${VERSION}.apk"
+          [ -n "$COMPAT" ] && cp "$COMPAT" "dist/ShizukuPlus-CompatHub-${VERSION}.apk" || true
+
+          # Verify each APK is actually signed and report which applicationId it carries, so a
+          # wrong-flavor artifact can never be published under the other name again.
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          for f in dist/*.apk; do
+            echo "== $f"
+            "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs "$f" | head -3
+            "$ANDROID_HOME/build-tools/$BT/aapt2" dump packagename "$f"
+          done
+          {
+            echo "### Release APKs (${VERSION})"
+            echo
+            echo "| File | applicationId |"
+            echo "|:--|:--|"
+            for f in dist/*.apk; do
+              echo "| $(basename "$f") | $("$ANDROID_HOME/build-tools/$BT/aapt2" dump packagename "$f") |"
+            done
+            echo
+            echo "Signed with: ${{ steps.keystore.outputs.signed_with }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shizukuplus-release-apks
+          path: dist/*.apk
+          retention-days: 30
+
+      - name: Publish release
+        if: ${{ github.event_name == 'push' || github.event.inputs.attach_release == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SIGNED_WITH: ${{ steps.keystore.outputs.signed_with }}
+          PRERELEASE: ${{ github.event_name == 'push' || github.event.inputs.prerelease == 'true' }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}-fork.${GITHUB_RUN_NUMBER}"
+          {
+            echo "Built from \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA}."
+            echo
+            echo "| File | What it is |"
+            echo "|:--|:--|"
+            echo "| \`ShizukuPlus-${VERSION}.apk\` | Shizuku+ (\`af.shizuku.plus.api\`) — installs alongside stock Shizuku |"
+            echo "| \`ShizukuPlus-DropIn-${VERSION}.apk\` | Drop-In flavor (\`moe.shizuku.privileged.api\`) — replaces stock Shizuku |"
+            echo "| \`ShizukuPlus-CompatHub-${VERSION}.apk\` | Compat Hub stub, bundles the Shizuku API for older clients |"
+            echo
+            echo "**Signing:** ${SIGNED_WITH}."
+            if [ "${SIGNED_WITH#throwaway}" != "${SIGNED_WITH}" ]; then
+              echo
+              echo "> This build is signed with a throwaway key, so it installs as a new app but Android"
+              echo "> refuses to update an existing Shizuku+ install with it. Add the \`KEYSTORE\` secrets to"
+              echo "> sign with the project key."
+            fi
+            echo
+            echo "Release build: R8 minified, shrunk resources, aapt2 resource-name collapsing applied."
+          } > notes.md
+          PRE=()
+          [ "$PRERELEASE" = "true" ] && PRE=(--prerelease)
+          gh release create "$TAG" dist/*.apk --title "Shizuku+ ${VERSION} (${GITHUB_REF_NAME})" \
+            --notes-file notes.md "${PRE[@]}"
