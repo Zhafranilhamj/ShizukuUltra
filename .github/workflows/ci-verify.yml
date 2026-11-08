@@ -176,7 +176,7 @@ jobs:
             {
               echo "## Unit tests failed"
               echo '```'
-              grep -E "FAILED|^e: |error:|\* What went wrong|Execution failed|Caused by|Tests? .*failed" -A4 test.log | tail -160
+              grep -E "FAILED|^e: |error:|\* What went wrong|Execution failed|Caused by|Could not (download|resolve|GET)|Tests? .*failed" -A4 test.log | tail -160
               echo '```'
               echo
               echo "First failing test output:"

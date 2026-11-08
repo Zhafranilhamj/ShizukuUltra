@@ -255,7 +255,7 @@ jobs:
             {
               echo "## Build failed"
               echo '```'
-              grep -E "^(e|w): |error:|FAILURE|\* What went wrong|Execution failed|Caused by|> Task .* FAILED" -A5 build.log \
+              grep -E "^(e|w): |error:|FAILURE|\* What went wrong|Execution failed|Caused by|Could not (download|resolve|GET)|> Task .* FAILED" -A5 build.log \
                 | tail -120
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
