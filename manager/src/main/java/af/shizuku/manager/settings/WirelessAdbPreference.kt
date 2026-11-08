@@ -254,7 +254,10 @@ class WirelessAdbPreference
                                     enabled = switchEnabled,
                                     role = Role.Switch,
                                     onValueChange = {
-                                        if (it) HapticUtils.toggleOn(view) else HapticUtils.toggleOff(view)
+                                        // No View here: this card is composed inside the
+                                        // Preference, so use HapticUtils' Context overload.
+                                        val ctx = context
+                                        if (it) HapticUtils.toggleOn(ctx) else HapticUtils.toggleOff(ctx)
                                         requestTcpMode(it)
                                     },
                                 ),
