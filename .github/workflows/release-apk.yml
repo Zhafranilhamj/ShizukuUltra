@@ -87,26 +87,38 @@ jobs:
           KS_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
           KS_ALIAS_PASS: ${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
         run: |
-          set -euo pipefail
-          if [ "$HAS_KEYSTORE" = "true" ]; then
-            printf '%s' "$KEYSTORE" | base64 --decode > key.jks
-            store_pass="$KS_PASS"; alias_name="$KS_ALIAS"; alias_pass="$KS_ALIAS_PASS"
-            echo "signed_with=project release key" >> "$GITHUB_OUTPUT"
-          else
-            # Throwaway key: the APK installs, but cannot update a build signed with the real one.
-            keytool -genkeypair -noprompt -keystore key.jks -storepass "ci-throwaway" \
-              -alias "ci" -keypass "ci-throwaway" -keyalg RSA -keysize 4096 -validity 10000 \
-              -dname "CN=Shizuku+ CI, O=Shizuku+, C=US" > /dev/null 2>&1
-            store_pass="ci-throwaway"; alias_name="ci"; alias_pass="ci-throwaway"
-            echo "::warning::No KEYSTORE secret: signing with a throwaway key. The APK installs as a fresh app but cannot update an existing install."
-            echo "signed_with=throwaway CI key (no KEYSTORE secret)" >> "$GITHUB_OUTPUT"
-          fi
+          # Anything printed here is re-emitted as an annotation on failure, because the raw log
+          # lives on blob storage that not every environment can read back.
           {
-            printf 'KEYSTORE_PASSWORD=%s\n' "$store_pass"
-            printf 'KEYSTORE_ALIAS=%s\n' "$alias_name"
-            printf 'KEYSTORE_ALIAS_PASSWORD=%s\n' "$alias_pass"
-            printf 'KEYSTORE_FILE=%s\n' "$GITHUB_WORKSPACE/key.jks"
-          } > signing.properties
+            set -euo pipefail
+            if [ "${HAS_KEYSTORE:-false}" = "true" ]; then
+              printf '%s' "$KEYSTORE" | base64 --decode > key.jks
+              store_pass="$KS_PASS"; alias_name="$KS_ALIAS"; alias_pass="$KS_ALIAS_PASS"
+              echo "signed_with=project release key" >> "$GITHUB_OUTPUT"
+              echo "Using the project release key."
+            else
+              # signing.gradle refuses a CI release build without signing.properties, so a
+              # throwaway key keeps the build possible; it installs but cannot update an existing
+              # install signed with the real key.
+              keytool -genkeypair -noprompt -keystore key.jks -storepass "cithrowaway" \
+                -alias "ci" -keypass "cithrowaway" -keyalg RSA -keysize 2048 -validity 10000 \
+                -dname "CN=ShizukuPlus CI, O=ShizukuPlus, C=US"
+              store_pass="cithrowaway"; alias_name="ci"; alias_pass="cithrowaway"
+              echo "No KEYSTORE secret: signing with a throwaway key (fresh install only)."
+              echo "signed_with=throwaway CI key (no KEYSTORE secret)" >> "$GITHUB_OUTPUT"
+            fi
+            {
+              printf 'KEYSTORE_PASSWORD=%s\n' "$store_pass"
+              printf 'KEYSTORE_ALIAS=%s\n' "$alias_name"
+              printf 'KEYSTORE_ALIAS_PASSWORD=%s\n' "$alias_pass"
+              printf 'KEYSTORE_FILE=%s\n' "$GITHUB_WORKSPACE/key.jks"
+            } > signing.properties
+            ls -l key.jks signing.properties
+            keytool -list -keystore key.jks -storepass "$store_pass" | tail -3
+          } 2>&1 | tee /tmp/sign.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then tail -30 /tmp/sign.log | sed 's/^/::error::/'; fi
+          exit "$rc"
 
       - name: Read version
         id: version
@@ -121,45 +133,57 @@ jobs:
 
       - name: Build release APKs
         run: |
-          set -euo pipefail
-          ./gradlew :manager:assembleShizukuplusRelease :manager:assembleDropinRelease :compat:assembleRelease \
-            --stacktrace --no-daemon -x :manager:lint
+          set -o pipefail
+          # --no-daemon + a log file: the tail is re-emitted as annotations on failure so a
+          # compile error is visible without reading the (externally hosted) job log.
+          ./gradlew :manager:assembleShizukuplusRelease :manager:assembleDropinRelease \
+            :compat:assembleRelease --stacktrace --no-daemon -x :manager:lint 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            grep -E "^e: |error:|FAILURE|What went wrong|Caused by|Execution failed" -A4 build.log \
+              | tail -60 | sed 's/^/::error::/' || true
+            exit "$rc"
+          fi
           ls -l manager/build/outputs/apk/*/release/ compat/build/outputs/apk/release/
 
       - name: Collect APKs
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          set -euo pipefail
+          set -o pipefail
           mkdir -p dist
-          pick() { # <flavor-dir> -> prints the first APK
-            find "$1" -name '*.apk' -type f | head -1
-          }
+          pick() { find "$1" -name '*.apk' -type f 2>/dev/null | head -1; }
           PLUS=$(pick manager/build/outputs/apk/shizukuplus/release)
           DROPIN=$(pick manager/build/outputs/apk/dropin/release)
           COMPAT=$(pick compat/build/outputs/apk/release)
-          [ -z "$PLUS" ] && { echo "::error::Plus APK missing"; exit 1; }
-          [ -z "$DROPIN" ] && { echo "::error::Drop-In APK missing"; exit 1; }
+          [ -z "$PLUS" ] && { echo "::error::Plus APK missing under manager/build/outputs/apk/shizukuplus/release"; exit 1; }
+          [ -z "$DROPIN" ] && { echo "::error::Drop-In APK missing under manager/build/outputs/apk/dropin/release"; exit 1; }
           cp "$PLUS" "dist/ShizukuPlus-${VERSION}.apk"
           cp "$DROPIN" "dist/ShizukuPlus-DropIn-${VERSION}.apk"
           [ -n "$COMPAT" ] && cp "$COMPAT" "dist/ShizukuPlus-CompatHub-${VERSION}.apk" || true
 
-          # Verify each APK is actually signed and report which applicationId it carries, so a
-          # wrong-flavor artifact can never be published under the other name again.
+          # Every APK must verify as signed, and its applicationId is printed so a wrong-flavor
+          # artifact can never be published under the other name again (#340).
           BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          APKSIGNER="$ANDROID_HOME/build-tools/$BT/apksigner"
+          AAPT2="$ANDROID_HOME/build-tools/$BT/aapt2"
+          {
+            echo "| File | applicationId |"
+            echo "|:--|:--|"
+          } > rows.md
           for f in dist/*.apk; do
-            echo "== $f"
-            "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs "$f" | head -3
-            "$ANDROID_HOME/build-tools/$BT/aapt2" dump packagename "$f"
+            if ! "$APKSIGNER" verify --print-certs "$f" > cert.txt 2>&1; then
+              echo "::error::$(basename "$f") is not signed: $(tail -3 cert.txt)"
+              exit 1
+            fi
+            pkg=$("$AAPT2" dump packagename "$f" 2>/dev/null || echo "?")
+            echo "$(basename "$f") -> $pkg ($(du -h "$f" | cut -f1))"
+            echo "| $(basename "$f") | $pkg |" >> rows.md
           done
           {
             echo "### Release APKs (${VERSION})"
             echo
-            echo "| File | applicationId |"
-            echo "|:--|:--|"
-            for f in dist/*.apk; do
-              echo "| $(basename "$f") | $("$ANDROID_HOME/build-tools/$BT/aapt2" dump packagename "$f") |"
-            done
+            cat rows.md
             echo
             echo "Signed with: ${{ steps.keystore.outputs.signed_with }}"
           } >> "$GITHUB_STEP_SUMMARY"
