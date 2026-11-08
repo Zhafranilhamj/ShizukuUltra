@@ -335,8 +335,9 @@ jobs:
           retention-days: 30
 
       - name: Publish release
-        # Only master publishes on push; a branch build produces artifacts for review.
-        if: ${{ (github.event_name == 'push' && github.ref_name == 'master') || github.event.inputs.attach_release == 'true' }}
+        # Only master publishes on push; a branch build produces artifacts for review. A manual run
+        # can ask for a release from any branch (that is how this branch yields an installable APK).
+        if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref_name == 'master') }}
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
