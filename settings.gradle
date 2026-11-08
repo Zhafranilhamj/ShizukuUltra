@@ -11,10 +11,6 @@ pluginManagement {
         id "com.android.application" version "9.4.0"
         id "com.android.library" version "9.4.0"
         id "com.google.devtools.ksp" version "2.3.6"
-<<<<<<< HEAD
-        id "dev.rikka.tools.materialthemebuilder" version "1.5.1"
-=======
->>>>>>> 1828a90 (fix(build): replace MaterialThemeBuilder, which also cannot run on AGP 9)
         id "dev.rikka.tools.refine" version "4.4.0"
         id "io.sentry.android.gradle" version "6.2.0" apply false
         id "com.diffplug.spotless" version "6.25.0"
