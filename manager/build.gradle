@@ -1,4 +1,3 @@
-import java.nio.file.Paths
 import org.gradle.process.ExecOperations
 import com.android.build.gradle.internal.tasks.CompileArtProfileTask
 
@@ -198,9 +197,19 @@ def registerCollapseTask = { String variantName ->
         // dependency on the resource optimizer.
         def variantNameForTask = variantName
         doLast {
-            def aapt2 = Paths.get(project.android.sdkDirectory.path, "build-tools",
-                project.android.buildToolsVersion, "aapt2")
-            def root = new File(project.buildDir, "intermediates/optimized_processed_res")
+            // AGP 9 removed ApplicationExtension.sdkDirectory (and project.buildDir is gone from
+            // Gradle 9), so both come from the public APIs: the SDK Components provider for the SDK,
+            // and a scan of build-tools for an aapt2 binary (the configured build-tools version may
+            // not be the only one installed, and CI installs several).
+            def sdkDir = androidComponents.sdkComponents.sdkDirectory.get().asFile
+            def btRoot = new File(sdkDir, "build-tools")
+            def btVersions = (btRoot.listFiles() ?: []).findAll { it.isDirectory() }
+                .sort { it.name }.reverse()
+            def aapt2 = btVersions.collect { new File(it, "aapt2") }.find { it.canExecute() }
+            if (aapt2 == null) {
+                throw new GradleException("${taskName}: no aapt2 found under ${btRoot}")
+            }
+            def root = new File(layout.buildDirectory.get().asFile, "intermediates/optimized_processed_res")
             def variantDirs = root.listFiles({ File f ->
                 f.isDirectory() && f.name.equalsIgnoreCase(variantNameForTask)
             } as FileFilter)
