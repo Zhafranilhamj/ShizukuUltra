@@ -173,13 +173,23 @@ jobs:
           # "FAILURE:"/"What went wrong" block (where compiler errors are) plus the block itself, or
           # the tail when neither appears. GitHub caps the annotations per check run, so nothing
           # else is emitted.
+          # Kotlin reports diagnostics with absolute file URLs on lines starting "e: ", which is
+          # where the actionable message always is; prefer those, and fall back to the block around
+          # FAILURE when the build failed for another reason.
           report_gradle() {
             local f="$1" title="$2" start
+            local diag
+            diag=$(grep -oE 'e: file:///[^ ]+ .*' "$f" | head -10)
+            if [ -n "$diag" ]; then
+              printf '%s\n' "$diag" | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+              return
+            fi
             start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
             if [ -n "$start" ]; then
-              sed -n "${start},$((start + 24))p" "$f"
+              from=$((start - 20)); [ "$from" -lt 1 ] && from=1
+              sed -n "${from},$((start + 10))p" "$f"
             else
-              tail -25 "$f"
+              tail -20 "$f"
             fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
           gradle --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest \
