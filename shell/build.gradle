@@ -64,8 +64,10 @@ androidComponents {
     onVariants(selector().all()) { variant ->
         def buildType = variant.buildType
         def minified = (buildType == "release")
-        def assemble = tasks.named("assemble${variant.name.capitalize()}")
-        assemble.configure { task ->
+        // tasks.named() would throw UnknownTaskException here - AGP creates assemble<Variant> later,
+        // after the variant callbacks run - so match on the name instead.
+        def assembleName = "assemble${variant.name.capitalize()}"
+        tasks.matching { it.name == assembleName }.configureEach { task ->
             task.doLast { bundleShellArtifacts(buildType, minified) }
         }
     }
