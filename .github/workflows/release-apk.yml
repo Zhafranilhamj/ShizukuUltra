@@ -259,6 +259,7 @@ jobs:
               tail -25 "$f"
             fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
+          echo "+ gradle :manager:assembleShizukuplusRelease :manager:assembleDropinRelease --stacktrace"
           gradle :manager:assembleShizukuplusRelease :manager:assembleDropinRelease \
             :compat:assembleRelease --stacktrace --no-daemon --console=plain -Pkotlin.compiler.execution.strategy=in-process -x :manager:lint 2>&1 | tee build.log
           rc=${PIPESTATUS[0]}
