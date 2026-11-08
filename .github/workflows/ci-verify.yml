@@ -32,6 +32,32 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
+      # The wrapper resolves its distribution through services.gradle.org, which redirects to a
+      # GitHub release asset; that edge answers 504 for whole minutes, which killed the build before
+      # configuration ran. Unpack the distribution here with retries and put its bin directory on
+      # PATH, so every later step calls `gradle` on a verified local copy instead of the wrapper.
+      - name: Provision Gradle
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's#.*gradle-\(.*\)-bin\.zip#\1#p' gradle/wrapper/gradle-wrapper.properties)"
+          URL="$(sed -n 's#^distributionUrl=\(.*\)#\1#p' gradle/wrapper/gradle-wrapper.properties | sed 's#\\:#:#g')"
+          DEST="$RUNNER_TEMP/gradle-dist"
+          if [ -x "$DEST/gradle-${VERSION}/bin/gradle" ]; then
+            echo "using cached $DEST/gradle-${VERSION}"
+          else
+            for attempt in 1 2 3 4 5; do
+              echo "downloading $URL (attempt ${attempt})"
+              if curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/gradle.zip" "$URL"; then
+                unzip -q -o "$RUNNER_TEMP/gradle.zip" -d "$DEST" && break
+              fi
+              sleep $((attempt * 15))
+            done
+          fi
+          test -x "$DEST/gradle-${VERSION}/bin/gradle"
+          echo "GRADLE_HOME=$DEST/gradle-${VERSION}" >> "$GITHUB_ENV"
+          echo "$DEST/gradle-${VERSION}/bin" >> "$GITHUB_PATH"
+          # Use this distribution directly (`gradle`) instead of `./gradlew`, which would go back
+          # to services.gradle.org for the same archive.
       - name: Diagnose environment
         run: |
           {
@@ -72,7 +98,7 @@ jobs:
           # before any project is configured. Retry a few times so a flaky mirror is not reported as
           # a code failure (the distribution stays cached between attempts).
           for attempt in 1 2 3 4; do
-            ./gradlew help --stacktrace --no-daemon 2>&1 | tee config.log
+            gradle help --stacktrace --no-daemon 2>&1 | tee config.log
             rc=${PIPESTATUS[0]}
             if [ "$rc" -eq 0 ]; then
               break
@@ -140,7 +166,7 @@ jobs:
               tail -25 "$f"
             fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
-          ./gradlew --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest \
+          gradle --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest \
             :database:testDebugUnitTest --stacktrace 2>&1 | tee test.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
@@ -161,7 +187,7 @@ jobs:
 
       - name: Build debug APKs
         run: |
-          ./gradlew :manager:assembleShizukuplusDebug :manager:assembleDropinDebug --stacktrace -x :manager:lint
+          gradle :manager:assembleShizukuplusDebug :manager:assembleDropinDebug --stacktrace -x :manager:lint
 
       - name: Upload test reports
         if: failure()
