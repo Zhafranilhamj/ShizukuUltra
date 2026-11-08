@@ -213,7 +213,31 @@ jobs:
 
       - name: Build debug APKs
         run: |
-          gradle :manager:assembleShizukuplusDebug :manager:assembleDropinDebug --stacktrace --console=plain -Pkotlin.compiler.execution.strategy=in-process -x :manager:lint
+          # Same failure reporting as above: annotate rather than leave a bare exit code.
+          set +e
+          set -o pipefail
+          report_gradle() {
+            local f="$1" title="$2" start
+            local diag
+            diag=$(grep -oE 'e: file:///[^ ]+ .*' "$f" | head -10)
+            if [ -n "$diag" ]; then
+              printf '%s\n' "$diag" | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+              return
+            fi
+            start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
+            if [ -n "$start" ]; then
+              from=$((start - 20)); [ "$from" -lt 1 ] && from=1
+              sed -n "${from},$((start + 10))p" "$f"
+            else
+              tail -20 "$f"
+            fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+          }
+          gradle :manager:assembleShizukuplusDebug :manager:assembleDropinDebug --stacktrace --console=plain -Pkotlin.compiler.execution.strategy=in-process -x :manager:lint 2>&1 | tee debug.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            report_gradle debug.log Debug
+            exit "$rc"
+          fi
 
       - name: Upload test reports
         if: failure()
@@ -224,4 +248,6 @@ jobs:
             **/build/reports/tests/
             **/build/test-results/
             **/build/reports/lint-results*
+            debug.log
+            test.log
           retention-days: 7
