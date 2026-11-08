@@ -57,8 +57,10 @@ public final class GenerateTheme {
                     "Theme.Material3Expressive.Light.%s", "Theme.Material3Expressive.Light",
                     "Theme.Material3Expressive.Dark.%s", "Theme.Material3Expressive.Dark"),
             new Theme("dynamic_colors_overlay", null, true,
-                    "ThemeOverlay.Material3.DynamicColors.Light.%s", "ThemeOverlay.Material3.DynamicColors.Light",
-                    "ThemeOverlay.Material3.DynamicColors.Dark.%s", "ThemeOverlay.Material3.DynamicColors.Dark"),
+                    // Literal names in manager/build.gradle's materialThemeBuilder block, not
+                    // templates: values/themes_overlay.xml inherits from these exact styles.
+                    "ThemeOverlay.Material3.DynamicColors.Light.Shizuku", "ThemeOverlay.Material3.DynamicColors.Light",
+                    "ThemeOverlay.Material3.DynamicColors.Dark.Shizuku", "ThemeOverlay.Material3.DynamicColors.Dark"),
     };
 
     private static final int[] TONES = {0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100};
