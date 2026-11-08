@@ -158,6 +158,38 @@ tasks.configureEach { task ->
     }
 }
 
+// assets/rish_shizuku.dex: the shell helper the manager ships.
+//
+// The dex comes out of :shell's APK. It used to be written straight into manager/src/main/assets by
+// :shell's assemble task, which aapt2 rejected as 'Duplicate resources' for the asset merge - a
+// generated file appearing in a source asset directory confuses AGP's incremental mergers. Emit it
+// into a generated assets directory instead, one per build type.
+def registerShellDexTask = { String buildType, String shellAssembleTask ->
+    def outDir = layout.buildDirectory.dir("generated/dexAssets/${buildType}")
+    def apkDir = project(":shell").layout.buildDirectory.dir("outputs/apk/${buildType}")
+    return tasks.register("extractShellDex${buildType.capitalize()}") {
+        description = "Extracts rish_shizuku.dex from :shell's ${buildType} APK."
+        dependsOn(shellAssembleTask)
+        inputs.files(apkDir)
+        outputs.dir(outDir)
+        doLast {
+            def apk = (apkDir.get().asFile.listFiles({ File f ->
+                f.isFile() && f.name.endsWith(".apk")
+            } as FileFilter) ?: new File[0]).sort { it.lastModified() }.last()
+            def dex = zipTree(apk).matching { include "classes*.dex" }.files.sort { it.name }.first()
+            def target = new File(outDir.get().asFile, "rish_shizuku.dex")
+            target.parentFile.mkdirs()
+            target.bytes = dex.bytes
+        }
+    }
+}
+
+def shellDexDebug = registerShellDexTask("debug", ":shell:assembleDebug")
+def shellDexRelease = registerShellDexTask("release", ":shell:assembleRelease")
+
+android.sourceSets.debug.assets.srcDir(layout.buildDirectory.dir("generated/dexAssets/debug").get().asFile.absolutePath)
+android.sourceSets.release.assets.srcDir(layout.buildDirectory.dir("generated/dexAssets/release").get().asFile.absolutePath)
+
 // Overwrite the aapt2-optimised resource archive for one release variant, collapsing resource
 // names while honouring manager/aapt2-resources.cfg (see that file for the no_obfuscate list).
 //
@@ -311,15 +343,15 @@ afterEvaluate {
         rename { "compat.apk" }
     }
     
-    // Asset merging must also wait for the shell/compat assets: both are written into
-    // src/main/assets by their tasks, and with org.gradle.parallel=true the merge could enumerate
-    // the directory while it was being written, which surfaced as 'Duplicate resources' for
-    // rish_shizuku.dex. Match each merge task to its own build type - wiring both would build the
-    // release shell APK during a debug run (and make the two writers race for one file).
+    // Asset merging must also wait for compat.apk, which copyCompatApk* writes into
+    // src/main/assets. Match the build type: wiring both would build the release compat APK during
+    // a debug run (and make the two writers race for one file).
     tasks.matching { it.name ==~ /merge\w+(Debug|Release)Assets/ }.configureEach { t ->
         def release = t.name.endsWith("ReleaseAssets")
         t.dependsOn(release ? "copyCompatApkRelease" : "copyCompatApkDebug")
-        t.dependsOn(release ? ":shell:assembleRelease" : ":shell:assembleDebug")
+        // The generated assets directory is read by this task, so it must exist first (Gradle 9
+        // fails the build when a task reads another task's output undeclared).
+        t.dependsOn(release ? shellDexRelease : shellDexDebug)
     }
 
     // Wire compat and shell for both the generic pre-build hooks (single-flavor builds)

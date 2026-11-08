@@ -29,54 +29,37 @@ android {
     }
 }
 
-// Bundle this module's dex into the manager as assets/rish_shizuku.dex (the manager ships the
-// shell binary), and keep R8's mapping file for release builds.
+// Keep R8's mapping file for release builds.
 //
 // This used to walk android.applicationVariants, which AGP 9 removed; reading it fails
 // configuration with "Could not get unknown property 'applicationVariants'". The Android
-// Components API gives the variants instead, and the artifacts are located at execution time (an
-// APK's path depends on flavouring and signing, so it is discovered, not computed).
-def bundleShellArtifacts = { String buildType, boolean minified ->
-    def outDir = new File(rootDir, "out")
-    def mappingDir = new File(outDir, "mapping")
-    def dexPath = new File(rootProject.rootDir, "manager/src/main/assets")
-    def apkDir = layout.buildDirectory.dir("outputs/apk/${buildType}").get().asFile
-    if (minified) {
-        def mapping = layout.buildDirectory.file("outputs/mapping/${buildType}/mapping.txt").get().asFile
-        if (mapping.exists()) {
-            mappingDir.mkdirs()
-            // java.io.File has no rename(String target); copy then drop the original.
-            def target = new File(mappingDir, "cmd-v${rootProject.ext.versionName}.txt")
-            java.nio.file.Files.copy(mapping.toPath(), target.toPath(),
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-            mapping.delete()
-        }
+// Components API gives the variants instead.
+//
+// The dex itself is no longer extracted here: the manager reads it out of this module's APK into a
+// generated assets directory (see manager/build.gradle). Writing it into
+// manager/src/main/assets used to make aapt2 fail with 'Duplicate resources' for the asset merge,
+// because the file appeared in the source tree while the merger was reading it.
+def exportMapping = { String buildType ->
+    def mapping = layout.buildDirectory.file("outputs/mapping/${buildType}/mapping.txt").get().asFile
+    if (!mapping.exists()) {
+        return
     }
-    // listFiles() yields a File[] and sort {} yields a List (for the zip entries) - normalise both
-    // to a List before calling isEmpty(), which a File[] does not have in Groovy.
-    def apks = ((apkDir.listFiles({ File f -> f.isFile() && f.name.endsWith(".apk") } as FileFilter)
-        ?: new File[0]) as List).sort { it.lastModified() }
-    if (apks.isEmpty()) {
-        throw new GradleException("no APK found in ${apkDir}; cannot bundle rish_shizuku.dex")
-    }
-    def apk = apks.last()
-    def dexFiles = (zipTree(apk).matching { include "classes*.dex" }.files as List).sort { it.name }
-    if (dexFiles.isEmpty()) {
-        throw new GradleException("${apk} contains no classes*.dex")
-    }
-    dexPath.mkdirs()
-    new File(dexPath, "rish_shizuku.dex").bytes = dexFiles[0].bytes
+    def mappingDir = new File(rootDir, "out/mapping")
+    mappingDir.mkdirs()
+    java.nio.file.Files.copy(mapping.toPath(),
+        new File(mappingDir, "cmd-v${rootProject.ext.versionName}.txt").toPath(),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    mapping.delete()
 }
 
 androidComponents {
     onVariants(selector().all()) { variant ->
         def buildType = variant.buildType
-        def minified = (buildType == "release")
         // tasks.named() would throw UnknownTaskException here - AGP creates assemble<Variant> later,
         // after the variant callbacks run - so match on the name instead.
         def assembleName = "assemble${variant.name.capitalize()}"
         tasks.matching { it.name == assembleName }.configureEach { task ->
-            task.doLast { bundleShellArtifacts(buildType, minified) }
+            task.doLast { exportMapping(buildType) }
         }
     }
 }
