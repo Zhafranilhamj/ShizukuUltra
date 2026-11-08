@@ -68,6 +68,9 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             # Annotate the tail unconditionally: a Gradle configuration failure does not always
             # match a fixed set of patterns, and the raw log is not always readable back.
+            # Settings/Build script compile errors appear in the first lines and do not match the
+            # error patterns, so always emit the head of a failed configuration log too.
+            head -25 config.log | while IFS= read -r l; do echo "::error title=Configuration-head::$l"; done
             report_log config.log Configuration
             exit "$rc"
           fi
