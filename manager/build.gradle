@@ -314,10 +314,12 @@ afterEvaluate {
     // Asset merging must also wait for the shell/compat assets: both are written into
     // src/main/assets by their tasks, and with org.gradle.parallel=true the merge could enumerate
     // the directory while it was being written, which surfaced as 'Duplicate resources' for
-    // rish_shizuku.dex.
-    tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach { t ->
-        t.dependsOn(":shell:assembleRelease", ":shell:assembleDebug")
-        t.dependsOn("copyCompatApkRelease", "copyCompatApkDebug")
+    // rish_shizuku.dex. Match each merge task to its own build type - wiring both would build the
+    // release shell APK during a debug run (and make the two writers race for one file).
+    tasks.matching { it.name ==~ /merge\w+(Debug|Release)Assets/ }.configureEach { t ->
+        def release = t.name.endsWith("ReleaseAssets")
+        t.dependsOn(release ? "copyCompatApkRelease" : "copyCompatApkDebug")
+        t.dependsOn(release ? ":shell:assembleRelease" : ":shell:assembleDebug")
     }
 
     // Wire compat and shell for both the generic pre-build hooks (single-flavor builds)
