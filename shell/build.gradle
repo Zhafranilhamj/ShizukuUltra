@@ -29,30 +29,44 @@ android {
     }
 }
 
-android.applicationVariants.all { variant ->
-    variant.outputs.all {
-        def outDir = new File(rootDir, "out")
-        def mappingPath = new File(outDir, "mapping").absolutePath
-        def dexPath = "${rootProject.rootDir.path}/manager/src/main/assets"
-        variant.assembleProvider.get().doLast {
-            if (variant.getBuildType().isMinifyEnabled()) {
-                copy {
-                    from variant.mappingFileProvider.get()
-                    into mappingPath
-                    rename { String fileName ->
-                        mappingPath + File.separator + "cmd-v${variant.versionName}.txt"
-                    }
-                }
-            }
-            copy {
-                def file = zipTree(file(outputFile)).matching { include "classes*.dex" }.singleFile
+// Bundle this module's dex into the manager as assets/rish_shizuku.dex (the manager ships the
+// shell binary), and keep R8's mapping file for release builds.
+//
+// This used to walk android.applicationVariants, which AGP 9 removed; reading it fails
+// configuration with "Could not get unknown property 'applicationVariants'". The Android
+// Components API gives the variants instead, and the artifacts are located at execution time (an
+// APK's path depends on flavouring and signing, so it is discovered, not computed).
+def bundleShellArtifacts = { String buildType, boolean minified ->
+    def outDir = new File(rootDir, "out")
+    def mappingDir = new File(outDir, "mapping")
+    def dexPath = new File(rootProject.rootDir, "manager/src/main/assets")
+    def apkDir = layout.buildDirectory.dir("outputs/apk/${buildType}").get().asFile
+    if (minified) {
+        def mapping = layout.buildDirectory.file("outputs/mapping/${buildType}/mapping.txt")
+        if (mapping.get().asFile.exists()) {
+            mappingDir.mkdirs()
+            mapping.get().asFile.rename(
+                new File(mappingDir, "cmd-v${rootProject.ext.versionName}.txt").path)
+        }
+    }
+    def apks = (apkDir.listFiles({ File f -> f.isFile() && f.name.endsWith(".apk") } as FileFilter)
+        ?: [] as File[]).sort { it.lastModified() }
+    if (apks.isEmpty()) {
+        throw new GradleException("no APK found in ${apkDir}; cannot bundle rish_shizuku.dex")
+    }
+    def apk = apks.last()
+    def dex = zipTree(apk).matching { include "classes*.dex" }.files.sort { it.name }.first()
+    dexPath.mkdirs()
+    new File(dexPath, "rish_shizuku.dex").bytes = dex.bytes
+}
 
-                from file
-                into dexPath
-                rename { String fileName ->
-                    fileName.replace(file.getName(), "rish_shizuku.dex")
-                }
-            }
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def buildType = variant.buildType
+        def minified = (buildType == "release")
+        def assemble = tasks.named("assemble${variant.name.capitalize()}")
+        assemble.configure { task ->
+            task.doLast { bundleShellArtifacts(buildType, minified) }
         }
     }
 }

@@ -225,15 +225,26 @@ def registerCollapseTask = { String variantName ->
 
 afterEvaluate {
     // Map each release variant to its optimize task by name: optimize<Variant>Resources.
-    def releaseVariants = project.android.applicationVariants.findAll { it.buildType.name == "release" }
+    //
+    // android.applicationVariants no longer exists in AGP 9 - reading it fails configuration with
+    // "Could not get unknown property 'applicationVariants' for object of type
+    // com.android.build.gradle.internal.dsl.ApplicationExtensionImpl$AgpDecorated" - so the variant
+    // list comes from the Android Components API instead, which is the supported surface.
+    def releaseVariantNames = []
+    androidComponents {
+        onVariants(selector().withBuildType("release")) { variant ->
+            releaseVariantNames.add(
+                variant.name.substring(0, 1).toUpperCase() + variant.name.substring(1))
+        }
+    }
     def wiredVariants = [] as Set
-    releaseVariants.each { variant ->
-        def expected = "optimize${variant.name.capitalize()}Resources"
+    releaseVariantNames.each { capitalizedName ->
+        def expected = "optimize${capitalizedName}Resources"
         def optimizeTask = tasks.findByName(expected)
         if (optimizeTask == null) {
             // Different AGP versions capitalize/abbreviate a little differently; fall back to any
             // optimize*ReleaseResources task whose name mentions this variant.
-            def normalized = variant.name.toLowerCase()
+            def normalized = capitalizedName.toLowerCase()
             def match = tasks.names.find { n ->
                 n.startsWith("optimize") && n.endsWith("ReleaseResources") &&
                     n.substring("optimize".length(), n.length() - "ReleaseResources".length())
@@ -245,14 +256,14 @@ afterEvaluate {
         }
         if (optimizeTask == null) {
             logger.warn("collapseReleaseResourceNames: no optimize*ReleaseResources task found for " +
-                "${variant.name}; aapt2 resource-name collapsing will not run for it.")
+                "${capitalizedName}; aapt2 resource-name collapsing will not run for it.")
             return
         }
-        def collapseTask = registerCollapseTask(variant.name)
+        def collapseTask = registerCollapseTask(capitalizedName)
         optimizeTask.finalizedBy(collapseTask)
-        wiredVariants.add(variant.name)
+        wiredVariants.add(capitalizedName)
     }
-    if (!releaseVariants.isEmpty() && wiredVariants.isEmpty()) {
+    if (!releaseVariantNames.isEmpty() && wiredVariants.isEmpty()) {
         logger.warn("collapseReleaseResourceNames: no release variant was wired to the collapse step.")
     }
 
@@ -284,8 +295,17 @@ afterEvaluate {
     tasks.findByName("preDebugBuild")?.dependsOn("copyCompatApkDebug")
     tasks.findByName("preDebugBuild")?.dependsOn(":shell:assembleDebug")
 
-    android.productFlavors.each { flavor ->
-        def name = flavor.name.capitalize()
+    // Product flavors come from the Android Components API (android.productFlavors is gone in AGP 9
+    // too); the pre-build hooks are looked up by task name, so record the names here and wire them
+    // once the variant callbacks have run.
+    def flavorNames = []
+    androidComponents {
+        onVariants(selector().all()) { variant ->
+            flavorNames.add(variant.flavorName)
+        }
+    }
+    flavorNames.findAll { it != null && !it.isEmpty() }.unique().each { flavor ->
+        def name = flavor.substring(0, 1).toUpperCase() + flavor.substring(1)
         tasks.findByName("pre${name}ReleaseBuild")?.dependsOn("copyCompatApkRelease")
         tasks.findByName("pre${name}ReleaseBuild")?.dependsOn(":shell:assembleRelease")
         tasks.findByName("pre${name}DebugBuild")?.dependsOn("copyCompatApkDebug")
