@@ -148,32 +148,106 @@ materialThemeBuilder {
     generateTextColors = true
 }
 
-def collapseReleaseResourceNames = tasks.register("collapseReleaseResourceNames") {
-    def aapt2 = Paths.get(project.android.sdkDirectory.path, "build-tools", project.android.buildToolsVersion, "aapt2")
-    def zip = Paths.get(project.buildDir.path, "intermediates",
-        "optimized_processed_res", "release", "optimizeReleaseResources", "resources-release-optimize.ap_")
-    doLast {
-        def optimized = new File("${zip}.opt")
-        def execOps = services.get(ExecOperations)
-        execOps.exec {
-            commandLine aapt2.toFile(), "optimize", "--collapse-resource-names",
-                "--resources-config-path", "aapt2-resources.cfg",
-                "-o", optimized, zip.toFile()
-            ignoreExitValue = false
-        }
-        if (optimized.exists()) {
-            delete(zip.toFile())
-            optimized.renameTo(zip.toFile())
+// Overwrite the aapt2-optimised resource archive for one release variant, collapsing resource
+// names while honouring manager/aapt2-resources.cfg (see that file for the no_obfuscate list).
+//
+// Flavors matter here. Each flavor gets its own archive under
+// intermediates/optimized_processed_res/<variant>/optimizeReleaseResources/, and AGP registers one
+// optimize task per variant (optimizeShizukuplusReleaseResources, optimizeDropinReleaseResources).
+// The old hook looked for the unflavored "optimizeReleaseResources", which a flavored build never
+// has, so nothing was ever finalizedBy'd: the collapse step silently never ran, aapt2's
+// --resources-config-path was never applied - and `-x collapseReleaseResourceNames` in CI failed
+// task selection with "task not found" for a task that did exist. Now there is one collapse task
+// per release variant, wired from that variant's optimize task (per variant, not shared: a single
+// shared task would only run once per build and leave the second flavor uncollapsed).
+def registerCollapseTask = { String variantName ->
+    def taskName = "collapse${variantName.capitalize()}ResourceNames"
+    return tasks.register(taskName) {
+        def configFile = file("aapt2-resources.cfg")
+        // The archive path is resolved in doLast: AGP creates it during the build, so it cannot be
+        // declared as a task input at configuration time without an implicit (and fragile) task
+        // dependency on the resource optimizer.
+        def variantNameForTask = variantName
+        doLast {
+            def aapt2 = Paths.get(project.android.sdkDirectory.path, "build-tools",
+                project.android.buildToolsVersion, "aapt2")
+            def root = new File(project.buildDir, "intermediates/optimized_processed_res")
+            def variantDirs = root.listFiles({ File f ->
+                f.isDirectory() && f.name.equalsIgnoreCase(variantNameForTask)
+            } as FileFilter)
+            if (variantDirs == null || variantDirs.length == 0) {
+                throw new GradleException(
+                    "${taskName}: no intermediates/optimized_processed_res/${variantNameForTask} " +
+                    "directory - the aapt2 resource-collapse step would have been skipped.")
+            }
+            def execOps = services.get(ExecOperations)
+            variantDirs.each { variantDir ->
+                def inner = new File(variantDir, "optimizeReleaseResources")
+                // Name has been stable across AGP 8/9 (resources-release-optimize.ap_); accept any
+                // .ap_ there so a rename by AGP doesn't silently skip the collapse again.
+                def archives = inner.listFiles({ File f ->
+                    f.isFile() && f.name.endsWith(".ap_")
+                } as FileFilter) ?: [] as File[]
+                if (archives.isEmpty()) {
+                    throw new GradleException(
+                        "${taskName}: ${inner} holds no *.ap_ resource archive")
+                }
+                archives.each { zip ->
+                    def legacy = new File("${zip}.opt")
+                    if (legacy.exists()) legacy.delete()
+                    logger.lifecycle("${taskName}: collapsing resource names in ${zip}")
+                    execOps.exec {
+                        commandLine aapt2.toFile(), "optimize", "--collapse-resource-names",
+                            "--resources-config-path", configFile.absolutePath,
+                            "-o", legacy, zip
+                        ignoreExitValue = false
+                    }
+                    if (!legacy.exists()) {
+                        throw new GradleException("${taskName}: aapt2 produced no output for ${zip}")
+                    }
+                    delete(zip)
+                    if (!legacy.renameTo(zip)) {
+                        throw new GradleException("${taskName}: could not replace ${zip}")
+                    }
+                }
+            }
         }
     }
 }
 
 afterEvaluate {
-    def optimizeReleaseResources = tasks.findByName("optimizeReleaseResources")
-    if (optimizeReleaseResources != null) {
-        optimizeReleaseResources.finalizedBy(collapseReleaseResourceNames)
+    // Map each release variant to its optimize task by name: optimize<Variant>Resources.
+    def releaseVariants = project.android.applicationVariants.findAll { it.buildType.name == "release" }
+    def wiredVariants = [] as Set
+    releaseVariants.each { variant ->
+        def expected = "optimize${variant.name.capitalize()}Resources"
+        def optimizeTask = tasks.findByName(expected)
+        if (optimizeTask == null) {
+            // Different AGP versions capitalize/abbreviate a little differently; fall back to any
+            // optimize*ReleaseResources task whose name mentions this variant.
+            def normalized = variant.name.toLowerCase()
+            def match = tasks.names.find { n ->
+                n.startsWith("optimize") && n.endsWith("ReleaseResources") &&
+                    n.substring("optimize".length(), n.length() - "ReleaseResources".length())
+                        .toLowerCase() == normalized.replace("release", "")
+            }
+            if (match != null) {
+                optimizeTask = tasks.findByName(match)
+            }
+        }
+        if (optimizeTask == null) {
+            logger.warn("collapseReleaseResourceNames: no optimize*ReleaseResources task found for " +
+                "${variant.name}; aapt2 resource-name collapsing will not run for it.")
+            return
+        }
+        def collapseTask = registerCollapseTask(variant.name)
+        optimizeTask.finalizedBy(collapseTask)
+        wiredVariants.add(variant.name)
     }
-    
+    if (!releaseVariants.isEmpty() && wiredVariants.isEmpty()) {
+        logger.warn("collapseReleaseResourceNames: no release variant was wired to the collapse step.")
+    }
+
     tasks.register("copyCompatApkRelease", Copy) {
         dependsOn ":compat:assembleRelease"
         // Use fileTree so we match both compat-release.apk (signed) and compat-release-unsigned.apk.
