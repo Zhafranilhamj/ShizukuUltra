@@ -42,28 +42,30 @@ def bundleShellArtifacts = { String buildType, boolean minified ->
     def dexPath = new File(rootProject.rootDir, "manager/src/main/assets")
     def apkDir = layout.buildDirectory.dir("outputs/apk/${buildType}").get().asFile
     if (minified) {
-        def mapping = layout.buildDirectory.file("outputs/mapping/${buildType}/mapping.txt")
-        if (mapping.get().asFile.exists()) {
+        def mapping = layout.buildDirectory.file("outputs/mapping/${buildType}/mapping.txt").get().asFile
+        if (mapping.exists()) {
             mappingDir.mkdirs()
-            mapping.get().asFile.rename(
-                new File(mappingDir, "cmd-v${rootProject.ext.versionName}.txt").path)
+            // java.io.File has no rename(String target); copy then drop the original.
+            def target = new File(mappingDir, "cmd-v${rootProject.ext.versionName}.txt")
+            java.nio.file.Files.copy(mapping.toPath(), target.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            mapping.delete()
         }
     }
-    // Missing directory is not an error by itself: report it as an empty result and let the message
-    // below name the directory. (sort {} turns the array into a List, so test with isEmpty().)
-    def apks = (apkDir.listFiles({ File f -> f.isFile() && f.name.endsWith(".apk") } as FileFilter)
-        ?: new File[0]).sort { it.lastModified() }
+    // listFiles() yields a File[] and sort {} yields a List (for the zip entries) - normalise both
+    // to a List before calling isEmpty(), which a File[] does not have in Groovy.
+    def apks = ((apkDir.listFiles({ File f -> f.isFile() && f.name.endsWith(".apk") } as FileFilter)
+        ?: new File[0]) as List).sort { it.lastModified() }
     if (apks.isEmpty()) {
         throw new GradleException("no APK found in ${apkDir}; cannot bundle rish_shizuku.dex")
     }
     def apk = apks.last()
-    def dexFiles = zipTree(apk).matching { include "classes*.dex" }.files.sort { it.name }
+    def dexFiles = (zipTree(apk).matching { include "classes*.dex" }.files as List).sort { it.name }
     if (dexFiles.isEmpty()) {
         throw new GradleException("${apk} contains no classes*.dex")
     }
-    def dex = dexFiles[0]
     dexPath.mkdirs()
-    new File(dexPath, "rish_shizuku.dex").bytes = dex.bytes
+    new File(dexPath, "rish_shizuku.dex").bytes = dexFiles[0].bytes
 }
 
 androidComponents {
