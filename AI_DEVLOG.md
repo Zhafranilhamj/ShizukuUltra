@@ -1796,7 +1796,7 @@ coordinator_root fix (carried to Apr 23).
 | ViewHolder `binding` param must be `private val` if used in member functions | Constructor params without `val`/`var` are inaccessible outside `init` — causes compile error |
 | Any edit to `database/src/main/assets/app_context_db.json` MUST bump `revision` | Installed apps ignore a download whose revision isn't higher than the one in use. Revision 1 is the first publish (2026-10-24 edits happened before it was ever on master); bumps start with the first edit after it's pushed. A pushed bump reaches every install within a day - don't bump for entries tied to unreleased features. Root-compat hub membership (`getRootLegacyPackages()`) is still hardcoded, so a remote update can change hub text but not add hub apps |
 | Serializer keeps in `database/consumer-rules.pro` MUST stay | Without them an R8 build parses the app database to nothing - silent, no crash |
-| `ksp.useKSP2=false` MUST stay in `gradle.properties` | KSP2 requires Room 2.7+; Room is pinned to 2.6.1 (stable). Removing this flag causes `unexpected jvm signature V` build failure |
+| ~~`ksp.useKSP2=false` MUST stay in `gradle.properties`~~ **REVERSED 2026-11-08** | KSP 2.3.6 removed KSP1 entirely, so the flag now aborts Gradle configuration (`KSP1 is no longer available`). The flag must NOT be present; KSP2 + Room 2.6.1 builds and packages the release APK (verified on CI 2026-11-08). The old rule — KSP2 needs Room 2.7+, else `unexpected jvm signature V` — applied to KSP 2.2.20 only. Keep Room and KSP bumped together |
 
 ---
 
