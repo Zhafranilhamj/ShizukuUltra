@@ -227,14 +227,6 @@ jobs:
           if [ "$rc" -ne 0 ]; then tail -30 /tmp/sign.log | sed 's/^/::error::/'; fi
           exit "$rc"
 
-      - name: Kotlin probe
-        run: |
-          gradle :manager:compileShizukuplusReleaseKotlin --console=plain --no-daemon -Pkotlin.compiler.execution.strategy=in-process 2>&1 | tee probe.log | true
-          sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' probe.log | grep -nE "error|warning:|e: " | grep -vE "^\s+at " | head -40 > /tmp/hits.txt
-          while IFS= read -r l; do echo "::error title=Kotlin::$l"; done < /tmp/hits.txt
-          echo "--- raw lines containing .kt: ---"
-          sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' probe.log | grep -n "\.kt:" | head -20 | while IFS= read -r l; do echo "::error title=KotlinFILE::$l"; done
-
       - name: Read version
         id: version
         run: |
@@ -285,6 +277,16 @@ jobs:
             exit "$rc"
           fi
           ls -l manager/build/outputs/apk/*/release/ compat/build/outputs/apk/release/
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build-logs
+          path: |
+            build.log
+            config.log
+          if-no-files-found: ignore
 
       - name: Collect APKs
         env:
