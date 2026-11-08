@@ -125,9 +125,14 @@ jobs:
           # the tail when neither appears. GitHub caps the annotations per check run, so nothing
           # else is emitted.
           report_gradle() {
-            local f="$1" title="$2" start
-            # Compiler diagnostics ("e: file:line: ...", "error: ...") come *before* the FAILURE
-            # block, so report a window ending at FAILURE rather than starting there.
+            local f="$1" title="$2" start from diag
+            # Compiler diagnostics ("e: file:///...: (l, c): message", "error: ...") appear anywhere
+            # in the log, usually before the FAILURE summary, and are the only actionable lines.
+            diag=$(grep -nE '(^|\s)e: (file|/)|^error: |^[^ ]+\.(kt|java):[0-9]+: ' "$f" | head -20)
+            if [ -n "$diag" ]; then
+              printf '%s\n' "$diag" | cut -d: -f2- | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+              return
+            fi
             start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
             if [ -n "$start" ]; then
               from=$((start - 30)); [ "$from" -lt 1 ] && from=1
