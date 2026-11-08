@@ -15,8 +15,6 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     env:
-      ANDROID_HOME: "/usr/local/lib/android/sdk"
-      ANDROID_SDK_ROOT: "/usr/local/lib/android/sdk"
       GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=1g"
     steps:
       - name: Checkout
@@ -34,8 +32,30 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
+      - name: Diagnose environment
+        run: |
+          {
+            echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
+            echo "java: $(java -version 2>&1 | head -1)"
+            echo "platforms: $(ls "${ANDROID_HOME:-/nonexistent}/platforms" 2>&1 | tr '\n' ' ')"
+            echo "build-tools: $(ls "${ANDROID_HOME:-/nonexistent}/build-tools" 2>&1 | tr '\n' ' ')"
+          } | tee /tmp/env.txt
+          while IFS= read -r line; do echo "::notice title=Env::$line"; done < /tmp/env.txt
+
       - name: Accept SDK licenses
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+        run: yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+
+      - name: Gradle configuration probe
+        run: |
+          set -o pipefail
+          ./gradlew help --stacktrace --no-daemon 2>&1 | tee config.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            grep -E "^(e|w): |error:|FAILURE|\* What went wrong|Caused by|Execution failed|Could not" -A6 config.log \
+              | head -60 | while IFS= read -r line; do echo "::error title=Configuration::$line"; done
+            exit "$rc"
+          fi
 
       - name: Pre-push guard
         env:
