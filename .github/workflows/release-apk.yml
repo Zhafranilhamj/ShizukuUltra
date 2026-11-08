@@ -103,8 +103,23 @@ jobs:
               tail -25 "$f"
             fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
-          ./gradlew help --stacktrace --no-daemon 2>&1 | tee config.log
-          rc=${PIPESTATUS[0]}
+          # The wrapper downloads its distribution from services.gradle.org, which redirects to a
+          # GitHub release asset; that CDN intermittently answers 504/EOF and the build then dies
+          # before any project is configured. Retry a few times so a flaky mirror is not reported as
+          # a code failure (the distribution stays cached between attempts).
+          for attempt in 1 2 3 4; do
+            ./gradlew help --stacktrace --no-daemon 2>&1 | tee config.log
+            rc=${PIPESTATUS[0]}
+            if [ "$rc" -eq 0 ]; then
+              break
+            fi
+            if grep -qE 'Server returned HTTP response code|Read timed out|Unable to load the wrapper' config.log; then
+              echo "::warning title=Configuration::Gradle distribution download failed (attempt ${attempt}); retrying"
+              sleep $((attempt * 20))
+              continue
+            fi
+            break
+          done
           if [ "$rc" -ne 0 ]; then
             # Annotate the tail unconditionally: a Gradle configuration failure does not always
             # match a fixed set of patterns, and the raw log is not always readable back.
