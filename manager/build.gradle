@@ -219,35 +219,35 @@ def registerCollapseTask = { String variantName ->
                     "directory - the aapt2 resource-collapse step would have been skipped.")
             }
             def execOps = services.get(ExecOperations)
+            def archives = []
             variantDirs.each { variantDir ->
-                def inner = new File(variantDir, "optimizeReleaseResources")
-                // Name has been stable across AGP 8/9 (resources-release-optimize.ap_); accept any
-                // .ap_ there so a rename by AGP doesn't silently skip the collapse again.
-                // listFiles() returns File[], which has no isEmpty() in Groovy; use length.
-                def archives = inner.listFiles({ File f ->
-                    f.isFile() && f.name.endsWith(".ap_")
-                } as FileFilter) ?: new File[0]
-                if (archives.length == 0) {
-                    throw new GradleException(
-                        "${taskName}: ${inner} holds no *.ap_ resource archive")
+                // AGP 9 nests the archive deeper than AGP 8 did (the intermediate directory gained
+                // another level and the file name changed), so find every .ap_ under this variant
+                // instead of assuming .../optimizeReleaseResources/resources-release-optimize.ap_.
+                variantDir.eachFileRecurse { f ->
+                    if (f.isFile() && f.name.endsWith(".ap_")) archives << f
                 }
-                archives.each { zip ->
-                    def legacy = new File("${zip}.opt")
-                    if (legacy.exists()) legacy.delete()
-                    logger.lifecycle("${taskName}: collapsing resource names in ${zip}")
-                    execOps.exec {
-                        commandLine aapt2.toFile(), "optimize", "--collapse-resource-names",
-                            "--resources-config-path", configFile.absolutePath,
-                            "-o", legacy, zip
-                        ignoreExitValue = false
-                    }
-                    if (!legacy.exists()) {
-                        throw new GradleException("${taskName}: aapt2 produced no output for ${zip}")
-                    }
-                    delete(zip)
-                    if (!legacy.renameTo(zip)) {
-                        throw new GradleException("${taskName}: could not replace ${zip}")
-                    }
+            }
+            if (archives.isEmpty()) {
+                throw new GradleException(
+                    "${taskName}: no *.ap_ resource archive under ${root}/${variantNameForTask}")
+            }
+            archives.each { zip ->
+                def legacy = new File(zip.path + ".opt")
+                if (legacy.exists()) legacy.delete()
+                logger.lifecycle("${taskName}: collapsing resource names in ${zip}")
+                execOps.exec {
+                    commandLine aapt2.toFile(), "optimize", "--collapse-resource-names",
+                        "--resources-config-path", configFile.absolutePath,
+                        "-o", legacy, zip
+                    ignoreExitValue = false
+                }
+                if (!legacy.exists()) {
+                    throw new GradleException("${taskName}: aapt2 produced no output for ${zip}")
+                }
+                delete(zip)
+                if (!legacy.renameTo(zip)) {
+                    throw new GradleException("${taskName}: could not replace ${zip}")
                 }
             }
         }
