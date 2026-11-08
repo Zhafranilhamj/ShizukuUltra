@@ -238,10 +238,17 @@ public final class GenerateTheme {
     }
 
     private void writeStyles(Theme theme) {
-        String snake = theme.name;
-        String camel = "Shizuku".equals(snake) ? "Shizuku" : capitalizeSnake(snake);
-        writeStyle(String.format(theme.lightFormat, camel), theme.lightParent, snake, true);
-        writeStyle(String.format(theme.darkFormat, camel), theme.darkParent, snake, false);
+        writeStyle(styleName(theme.lightFormat, theme.name), theme.lightParent, theme.name, true);
+        writeStyle(styleName(theme.darkFormat, theme.name), theme.darkParent, theme.name, false);
+    }
+
+    /**
+     * The plugin only substitutes the theme name when the format asks for it: the overlay themes
+     * above are declared with a literal name ("ThemeOverlay.Material3.DynamicColors.Light.Shizuku"),
+     * so a format without %s already is the final style name.
+     */
+    private static String styleName(String format, String themeName) {
+        return format.contains("%s") ? String.format(format, capitalizeSnake(themeName)) : format;
     }
 
     private void writeStyle(String styleName, String parent, String themeName, boolean light) {
@@ -321,14 +328,13 @@ public final class GenerateTheme {
             if (!theme.dynamicColors) {
                 continue;
             }
-            String camel = capitalizeSnake(theme.name);
             out.append(String.format("    <style name=\"%s\" parent=\"%s\">\n",
-                    String.format(theme.lightFormat, camel), theme.lightParent));
+                    styleName(theme.lightFormat, theme.name), theme.lightParent));
             dynamicItems(true);
             paletteSystemTokens();
             out.append("    </style>\n");
             out.append(String.format("    <style name=\"%s\" parent=\"%s\">\n",
-                    String.format(theme.darkFormat, camel), theme.darkParent));
+                    styleName(theme.darkFormat, theme.name), theme.darkParent));
             dynamicItems(false);
             paletteSystemTokens();
             out.append("    </style>\n");
