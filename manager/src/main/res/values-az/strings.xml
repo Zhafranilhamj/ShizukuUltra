@@ -44,12 +44,6 @@
         <item>Konturlu</item>
         <item>İki Rəngli</item>
     </string-array>
-    <string-array name="icon_styles_value" translatable="false">
-        <item>standard</item>
-        <item>outlined</item>
-        <item>twotone</item>
-    </string-array>
-
     <string name="home_edit_mode_banner">Əsas ekran düzənini fərdiləşdirmək üçün kartları basıb saxlayın və sürükləyin</string>
 
     <string name="settings_icon_color_mode">İki Rəngli İkon Rəngləri</string>
@@ -59,12 +53,6 @@
         <item>Eynilik</item>
         <item>Dinamik</item>
     </string-array>
-    <string-array name="icon_color_modes_value" translatable="false">
-        <item>none</item>
-        <item>uniform</item>
-        <item>per_icon</item>
-    </string-array>
-
     <string-array name="shape_styles">
         <item>Zen (Yarpaq/Damcı)</item>
         <item>Müasir (Material 3)</item>
@@ -72,36 +60,16 @@
         <item>Üzvi (Dairəvi)</item>
         <item>Kəsilmiş (Bucaqlı)</item>
     </string-array>
-    <string-array name="shape_styles_value" translatable="false">
-        <item>zen</item>
-        <item>modern</item>
-        <item>classic</item>
-        <item>squircle</item>
-        <item>cut</item>
-    </string-array>
-
     <string-array name="animation_intensities">
         <item>Azaldılmış</item>
         <item>Zərif</item>
         <item>Standart</item>
         <item>Ekspressiv</item>
     </string-array>
-    <string-array name="animation_intensities_value" translatable="false">
-        <item>0</item>
-        <item>1</item>
-        <item>2</item>
-        <item>3</item>
-    </string-array>
-
     <string-array name="status_card_outline_styles">
         <item>Material (tema rəngi)</item>
         <item>Yaşıl / Qırmızı (status rəngi)</item>
     </string-array>
-    <string-array name="status_card_outline_styles_value" translatable="false">
-        <item>material</item>
-        <item>status</item>
-    </string-array>
-
 
     <!-- Home - Status -->
     <string name="home_status_service_is_running">%1$s işləyir</string>
