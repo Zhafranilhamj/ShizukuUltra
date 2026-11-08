@@ -227,6 +227,24 @@ jobs:
           if [ "$rc" -ne 0 ]; then tail -30 /tmp/sign.log | sed 's/^/::error::/'; fi
           exit "$rc"
 
+      - name: Kotlin compile probe
+        run: |
+          set +e
+          gradle :manager:compileShizukuplusReleaseKotlin --console=plain --no-daemon \
+            --info -Pkotlin.compiler.execution.strategy=in-process 2>&1 | tee k.log
+          rc=${PIPESTATUS[0]}
+          sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' k.log > k.clean
+          echo "exit=$rc lines=$(wc -l < k.clean)"
+          # Whatever the compiler said about manager sources.
+          grep -nE '(manager/src|\.kt:)' k.clean | grep -viE "deprecat|warning: \[" | head -6 \
+            | while IFS= read -r l; do echo "::error title=K1::$l"; done
+          grep -nE "^(e|error)|Exception|OutOfMemory|Compilation error" k.clean | head -6 \
+            | while IFS= read -r l; do echo "::error title=K2::$l"; done
+          # The 8 lines after the manager compile task banner.
+          awk '/> Task :manager:compileShizukuplusReleaseKotlin/{f=1;next} f&&c<8{print;c++}' k.clean \
+            | while IFS= read -r l; do echo "::error title=K3::$l"; done
+          exit 0
+
       - name: Read version
         id: version
         run: |
