@@ -53,7 +53,10 @@ jobs:
               sleep $((attempt * 15))
             done
           fi
-          test -x "$DEST/gradle-${VERSION}/bin/gradle"
+          if [ ! -x "$DEST/gradle-${VERSION}/bin/gradle" ]; then
+            echo "::error title=Provision Gradle::could not download $URL after 5 attempts (distribution CDN is failing)"
+            exit 1
+          fi
           echo "GRADLE_HOME=$DEST/gradle-${VERSION}" >> "$GITHUB_ENV"
           echo "$DEST/gradle-${VERSION}/bin" >> "$GITHUB_PATH"
           # Use this distribution directly (`gradle`) instead of `./gradlew`, which would go back
