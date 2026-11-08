@@ -61,6 +61,7 @@ jobs:
           echo "$DEST/gradle-${VERSION}/bin" >> "$GITHUB_PATH"
           # Use this distribution directly (`gradle`) instead of `./gradlew`, which would go back
           # to services.gradle.org for the same archive.
+
       - name: Diagnose environment
         run: |
           {
@@ -89,6 +90,14 @@ jobs:
           # lines, hiding the real error.
           report_gradle() {
             local f="$1" title="$2" start
+            # Compiler diagnostics (Kotlin "e: file:line", javac "error:") are the useful output and
+            # come before the FAILURE block, so prefer them when present.
+            local diag
+            diag=$(grep -nE '^(e|w): |^[^ ]*: (error|warning): |^error: ' "$f" | head -20)
+            if [ -n "$diag" ]; then
+              printf '%s\n' "$diag" | cut -d: -f2- | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+              return
+            fi
             start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
             if [ -n "$start" ]; then
               sed -n "${start},$((start + 24))p" "$f"
@@ -96,10 +105,8 @@ jobs:
               tail -25 "$f"
             fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
-          # The wrapper downloads its distribution from services.gradle.org, which redirects to a
-          # GitHub release asset; that CDN intermittently answers 504/EOF and the build then dies
-          # before any project is configured. Retry a few times so a flaky mirror is not reported as
-          # a code failure (the distribution stays cached between attempts).
+          # Retry only failures that are network flakiness in this step (a plugin/AAR that fails to
+          # download once), so a real configuration error still fails immediately.
           for attempt in 1 2 3 4; do
             gradle help --stacktrace --no-daemon 2>&1 | tee config.log
             rc=${PIPESTATUS[0]}
