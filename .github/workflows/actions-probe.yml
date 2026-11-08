@@ -1,0 +1,14 @@
+name: Actions Probe
+
+# Temporary probe: confirms whether this fork runs workflows pushed on a feature branch.
+# Deleted once it has answered the question.
+on:
+  push:
+    branches: [arena/fd31deed-shizukuultra]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "actions are alive on ${{ github.ref_name }}"
