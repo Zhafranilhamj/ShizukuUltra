@@ -89,27 +89,32 @@ jobs:
           # the tail when neither appears. GitHub caps the annotations per check run, so nothing
           # else is emitted.
           report_gradle() {
-            local f="$1" title="$2" start from diag
-            # Compiler diagnostics ("e: file:///...: (l, c): message", "error: ...") appear anywhere
-            # in the log, usually before the FAILURE summary, and are the only actionable lines.
-            diag=$(grep -nE '(^|\s)e: (file|/)|^error: |^[^ ]+\.(kt|java):[0-9]+: ' "$f" | head -20)
+            local f="$1" title="$2" start from clean
+            # Gradle colours its output, and GitHub caps annotations per step, so strip ANSI, then
+            # report compiler diagnostics first (they are the only actionable lines).
+            clean=$(mktemp)
+            sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$f" > "$clean"
+            local diag
+            diag=$(grep -nE 'e: |^error: |error: |Unresolved reference|Compilation error|Caused by: ' "$clean" | grep -vE '^\s+at ' | head -10)
             if [ -n "$diag" ]; then
               printf '%s\n' "$diag" | cut -d: -f2- | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+              rm -f "$clean"
               return
             fi
-            start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
+            start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$clean" | head -1 | cut -d: -f1)
             if [ -n "$start" ]; then
-              from=$((start - 30)); [ "$from" -lt 1 ] && from=1
-              sed -n "${from},$((start + 10))p" "$f"
+              from=$((start - 25)); [ "$from" -lt 1 ] && from=1
+              sed -n "${from},$((start + 5))p" "$clean"
             else
-              tail -30 "$f"
+              tail -20 "$clean"
             fi | grep -vE '^\s+at |^\s*\.\.\. [0-9]+ (more|common frames)' \
               | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+            rm -f "$clean"
           }
           # Retry only failures that are network flakiness in this step (a plugin/AAR that fails to
           # download once), so a real configuration error still fails immediately.
           for attempt in 1 2 3 4; do
-            gradle help --stacktrace --no-daemon 2>&1 | tee config.log
+            gradle help --stacktrace --no-daemon --console=plain 2>&1 | tee config.log
             rc=${PIPESTATUS[0]}
             if [ "$rc" -eq 0 ]; then
               break
@@ -178,7 +183,7 @@ jobs:
             fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
           gradle --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest \
-            :database:testDebugUnitTest --stacktrace 2>&1 | tee test.log
+            :database:testDebugUnitTest --stacktrace --console=plain 2>&1 | tee test.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
             {
@@ -198,7 +203,7 @@ jobs:
 
       - name: Build debug APKs
         run: |
-          gradle :manager:assembleShizukuplusDebug :manager:assembleDropinDebug --stacktrace -x :manager:lint
+          gradle :manager:assembleShizukuplusDebug :manager:assembleDropinDebug --stacktrace --console=plain -x :manager:lint
 
       - name: Upload test reports
         if: failure()
