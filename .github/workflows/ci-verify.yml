@@ -65,8 +65,26 @@ jobs:
 
       - name: Unit tests
         run: |
+          set -o pipefail
           ./gradlew --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest \
-            :database:testDebugUnitTest --stacktrace
+            :database:testDebugUnitTest --stacktrace 2>&1 | tee test.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            {
+              echo "## Unit tests failed"
+              echo '```'
+              grep -E "FAILED|^e: |error:|\* What went wrong|Execution failed|Caused by|Tests? .*failed" -A4 test.log | tail -160
+              echo '```'
+              echo
+              echo "First failing test output:"
+              echo '```'
+              awk '/FAILED/{flag=1} flag' test.log | head -80
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            grep -E "FAILED|^e: |error:|\* What went wrong|Execution failed" test.log | tail -60 \
+              | while IFS= read -r line; do echo "::error title=Test::$line"; done
+            exit "$rc"
+          fi
 
       - name: Build debug APKs
         run: |

@@ -134,14 +134,21 @@ jobs:
       - name: Build release APKs
         run: |
           set -o pipefail
-          # --no-daemon + a log file: the tail is re-emitted as annotations on failure so a
-          # compile error is visible without reading the (externally hosted) job log.
           ./gradlew :manager:assembleShizukuplusRelease :manager:assembleDropinRelease \
             :compat:assembleRelease --stacktrace --no-daemon -x :manager:lint 2>&1 | tee build.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
-            grep -E "^e: |error:|FAILURE|What went wrong|Caused by|Execution failed" -A4 build.log \
-              | tail -60 | sed 's/^/::error::/' || true
+            # Surface the failure through annotations and the job summary: the raw log is served
+            # from external blob storage, which an API-only client cannot always read back.
+            {
+              echo "## Build failed"
+              echo '```'
+              grep -E "^(e|w): |error:|FAILURE|\* What went wrong|Execution failed|Caused by|> Task .* FAILED" -A5 build.log \
+                | tail -120
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            grep -E "^(e|w): |error:|FAILURE|\* What went wrong|Execution failed|Caused by|> Task .* FAILED" -A3 build.log \
+              | tail -80 | while IFS= read -r line; do echo "::error title=Gradle::$line"; done
             exit "$rc"
           fi
           ls -l manager/build/outputs/apk/*/release/ compat/build/outputs/apk/release/
