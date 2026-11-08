@@ -1,0 +1,18 @@
+name: Probe Channels
+on:
+  push:
+    branches: [arena/fd31deed-shizukuultra]
+    paths: ['.github/probe/**']
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Emit channels
+        run: |
+          echo "::error title=Alpha::plain error line"
+          printf 'line with spaces and = signs\n' | while IFS= read -r l; do echo "::error title=Bravo::$l"; done
+          echo "## summary works" >> "$GITHUB_STEP_SUMMARY"
+          echo "summary line two" >> "$GITHUB_STEP_SUMMARY"
+          printf 'BUILD FAILED\n* What went wrong:\n> Could not compile\n' | tee /tmp/x.log
+          tail -3 /tmp/x.log | while IFS= read -r l; do echo "::error title=Charlie::$l"; done
+          exit 1
