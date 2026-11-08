@@ -136,6 +136,7 @@ def generateThemeRes = tasks.register("generateThemeRes", Exec) {
     workingDir = rootProject.projectDir.absolutePath
     def outDir = generatedThemeResDir.get().asFile
     inputs.dir(file("${rootProject.projectDir}/scripts/dev/palette"))
+    inputs.file(file("${rootProject.projectDir}/scripts/dev/gen-theme-res.sh"))
     outputs.dir(outDir)
     doFirst {
         outDir.mkdirs()
@@ -143,7 +144,9 @@ def generateThemeRes = tasks.register("generateThemeRes", Exec) {
     commandLine "bash", "scripts/dev/gen-theme-res.sh", outDir.absolutePath
 }
 
-android.sourceSets.main.res.srcDir(generatedThemeResDir)
+// srcDir() only accepts a path here - AGP 9 rejects Provider instances in the SourceSet API with
+// "You cannot add Provider instances to the Android SourceSet API" - so resolve it eagerly.
+android.sourceSets.main.res.srcDir(generatedThemeResDir.get().asFile.absolutePath)
 tasks.configureEach { task ->
     // Everything that reads resources must wait for the generator.
     if (task.name.startsWith("merge") && task.name.contains("Resources")
