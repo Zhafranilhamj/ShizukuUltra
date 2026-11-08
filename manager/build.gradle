@@ -223,10 +223,11 @@ def registerCollapseTask = { String variantName ->
                 def inner = new File(variantDir, "optimizeReleaseResources")
                 // Name has been stable across AGP 8/9 (resources-release-optimize.ap_); accept any
                 // .ap_ there so a rename by AGP doesn't silently skip the collapse again.
+                // listFiles() returns File[], which has no isEmpty() in Groovy; use length.
                 def archives = inner.listFiles({ File f ->
                     f.isFile() && f.name.endsWith(".ap_")
-                } as FileFilter) ?: [] as File[]
-                if (archives.isEmpty()) {
+                } as FileFilter) ?: new File[0]
+                if (archives.length == 0) {
                     throw new GradleException(
                         "${taskName}: ${inner} holds no *.ap_ resource archive")
                 }
