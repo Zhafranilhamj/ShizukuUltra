@@ -168,6 +168,24 @@ tasks.configureEach { task ->
 // task selection with "task not found" for a task that did exist. Now there is one collapse task
 // per release variant, wired from that variant's optimize task (per variant, not shared: a single
 // shared task would only run once per build and leave the second flavor uncollapsed).
+// Variant callbacks have to be registered before AGP configures the project. Doing it inside
+// afterEvaluate fails with "It is too late to add actions as the callbacks already executed", so
+// the variant/flavor names are collected here and used by the afterEvaluate block below.
+def releaseVariantNames = []
+def flavorNames = []
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        if (variant.buildType == "release") {
+            releaseVariantNames.add(
+                variant.name.substring(0, 1).toUpperCase() + variant.name.substring(1))
+        }
+        if (variant.flavorName != null && !variant.flavorName.isEmpty()) {
+            flavorNames.add(
+                variant.flavorName.substring(0, 1).toUpperCase() + variant.flavorName.substring(1))
+        }
+    }
+}
+
 def registerCollapseTask = { String variantName ->
     def taskName = "collapse${variantName.capitalize()}ResourceNames"
     return tasks.register(taskName) {
@@ -230,13 +248,6 @@ afterEvaluate {
     // "Could not get unknown property 'applicationVariants' for object of type
     // com.android.build.gradle.internal.dsl.ApplicationExtensionImpl$AgpDecorated" - so the variant
     // list comes from the Android Components API instead, which is the supported surface.
-    def releaseVariantNames = []
-    androidComponents {
-        onVariants(selector().withBuildType("release")) { variant ->
-            releaseVariantNames.add(
-                variant.name.substring(0, 1).toUpperCase() + variant.name.substring(1))
-        }
-    }
     def wiredVariants = [] as Set
     releaseVariantNames.each { capitalizedName ->
         def expected = "optimize${capitalizedName}Resources"
@@ -295,17 +306,7 @@ afterEvaluate {
     tasks.findByName("preDebugBuild")?.dependsOn("copyCompatApkDebug")
     tasks.findByName("preDebugBuild")?.dependsOn(":shell:assembleDebug")
 
-    // Product flavors come from the Android Components API (android.productFlavors is gone in AGP 9
-    // too); the pre-build hooks are looked up by task name, so record the names here and wire them
-    // once the variant callbacks have run.
-    def flavorNames = []
-    androidComponents {
-        onVariants(selector().all()) { variant ->
-            flavorNames.add(variant.flavorName)
-        }
-    }
-    flavorNames.findAll { it != null && !it.isEmpty() }.unique().each { flavor ->
-        def name = flavor.substring(0, 1).toUpperCase() + flavor.substring(1)
+    flavorNames.unique().each { name ->
         tasks.findByName("pre${name}ReleaseBuild")?.dependsOn("copyCompatApkRelease")
         tasks.findByName("pre${name}ReleaseBuild")?.dependsOn(":shell:assembleRelease")
         tasks.findByName("pre${name}DebugBuild")?.dependsOn("copyCompatApkDebug")
