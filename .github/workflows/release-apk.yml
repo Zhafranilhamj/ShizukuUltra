@@ -84,6 +84,10 @@ jobs:
       # and reports the reason as annotations, before paying for a full build.
       - name: Gradle configuration probe
         run: |
+          # GitHub runs steps with `bash -e -o pipefail`, which aborts the script at the first
+          # failing command - before any of the reporting below could run, which is why earlier
+          # failures only ever said "exit code 1". Turn -e off and handle the status explicitly.
+          set +e
           set -o pipefail
           ./gradlew help --stacktrace --no-daemon 2>&1 | tee config.log
           rc=${PIPESTATUS[0]}
@@ -163,6 +167,10 @@ jobs:
 
       - name: Build release APKs
         run: |
+          # GitHub runs steps with `bash -e -o pipefail`, which aborts the script at the first
+          # failing command - before any of the reporting below could run, which is why earlier
+          # failures only ever said "exit code 1". Turn -e off and handle the status explicitly.
+          set +e
           set -o pipefail
           ./gradlew :manager:assembleShizukuplusRelease :manager:assembleDropinRelease \
             :compat:assembleRelease --stacktrace --no-daemon -x :manager:lint 2>&1 | tee build.log
@@ -186,6 +194,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          set +e
           set -o pipefail
           mkdir -p dist
           pick() { find "$1" -name '*.apk' -type f 2>/dev/null | head -1; }

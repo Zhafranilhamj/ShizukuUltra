@@ -48,6 +48,10 @@ jobs:
 
       - name: Gradle configuration probe
         run: |
+          # GitHub runs steps with `bash -e -o pipefail`, which aborts the script at the first
+          # failing command - before any of the reporting below could run, which is why earlier
+          # failures only ever said "exit code 1". Turn -e off and handle the status explicitly.
+          set +e
           set -o pipefail
           ./gradlew help --stacktrace --no-daemon 2>&1 | tee config.log
           rc=${PIPESTATUS[0]}
@@ -86,6 +90,10 @@ jobs:
 
       - name: Unit tests
         run: |
+          # GitHub runs steps with `bash -e -o pipefail`, which aborts the script at the first
+          # failing command - before any of the reporting below could run, which is why earlier
+          # failures only ever said "exit code 1". Turn -e off and handle the status explicitly.
+          set +e
           set -o pipefail
           ./gradlew --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest \
             :database:testDebugUnitTest --stacktrace 2>&1 | tee test.log
