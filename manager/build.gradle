@@ -6,7 +6,6 @@ plugins {
     id "com.android.application"
     id "org.jetbrains.kotlin.plugin.compose" version "2.2.20"
     id "dev.rikka.tools.refine"
-    id "dev.rikka.tools.materialthemebuilder"
     id "io.sentry.android.gradle"
     id "org.jetbrains.kotlin.plugin.serialization" version "2.2.20"
     id "com.diffplug.spotless"
@@ -119,25 +118,39 @@ spotless {
     }
 }
 
-materialThemeBuilder {
-    themes {
-        shizuku {
-            primaryColor = "#3F51B5"
-            lightThemeFormat = "Theme.Material3Expressive.Light.%s"
-            lightThemeParent = "Theme.Material3Expressive.Light"
-            darkThemeFormat = "Theme.Material3Expressive.Dark.%s"
-            darkThemeParent = "Theme.Material3Expressive.Dark"
-        }
-        dynamic_colors_overlay {
-            dynamicColors = true
-            lightThemeFormat = "ThemeOverlay.Material3.DynamicColors.Light.Shizuku"
-            lightThemeParent = "ThemeOverlay.Material3.DynamicColors.Light"
-            darkThemeFormat = "ThemeOverlay.Material3.DynamicColors.Dark.Shizuku"
-            darkThemeParent = "ThemeOverlay.Material3.DynamicColors.Dark"
-        }
+
+// Generated Material 3 theme resources, replacing the dev.rikka.tools.materialthemebuilder plugin.
+//
+// That plugin (1.5.1, last published 2024) resolves AGP's legacy BaseExtension, which AGP 9
+// removed, so `id "dev.rikka.tools.materialthemebuilder"` failed configuration outright with
+// "Extension of type 'BaseExtension' does not exist" - nothing in this module could be configured
+// or built. Its `materialThemeBuilder { ... }` block is now scripts/dev/palette/GenerateTheme.java,
+// which writes the same resources (md_theme_* colours, palette* attributes, the dynamic-colour
+// values-v31 themes and the accent overlays) from the same seed, and is run here into a generated
+// res directory that is part of the main source set. It needs nothing but the JDK: the colour
+// maths comes from material-color-utilities, vendored in scripts/dev/palette/mcu.
+def generatedThemeResDir = layout.buildDirectory.dir("generated/themeRes")
+
+def generateThemeRes = tasks.register("generateThemeRes", Exec) {
+    description = "Generates the Material 3 theme resources (md_theme_*, palette*, dynamic + accents)."
+    workingDir = rootProject.projectDir.absolutePath
+    def outDir = generatedThemeResDir.get().asFile
+    inputs.dir(file("${rootProject.projectDir}/scripts/dev/palette"))
+    outputs.dir(outDir)
+    doFirst {
+        outDir.mkdirs()
     }
-    generatePalette = true
-    generateTextColors = true
+    commandLine "bash", "scripts/dev/gen-theme-res.sh", outDir.absolutePath
+}
+
+android.sourceSets.main.res.srcDir(generatedThemeResDir)
+tasks.configureEach { task ->
+    // Everything that reads resources must wait for the generator.
+    if (task.name.startsWith("merge") && task.name.contains("Resources")
+            || task.name.startsWith("process") && task.name.endsWith("Resources")
+            || task.name.startsWith("generate") && task.name.endsWith("Resources")) {
+        task.dependsOn(generateThemeRes)
+    }
 }
 
 // Overwrite the aapt2-optimised resource archive for one release variant, collapsing resource

@@ -1,12 +1,12 @@
-import com.google.android.material.color.utilities.DynamicColor;
-import com.google.android.material.color.utilities.DynamicScheme;
-import com.google.android.material.color.utilities.Hct;
-import com.google.android.material.color.utilities.MaterialDynamicColors;
-import com.google.android.material.color.utilities.SchemeContent;
-import com.google.android.material.color.utilities.SchemeFidelity;
-import com.google.android.material.color.utilities.SchemeTonalSpot;
-import com.google.android.material.color.utilities.SchemeVibrant;
-import com.google.android.material.color.utilities.TonalPalette;
+import DynamicColor;
+import DynamicScheme;
+import Hct;
+import MaterialDynamicColors;
+import SchemeContent;
+import SchemeFidelity;
+import SchemeTonalSpot;
+import SchemeVibrant;
+import TonalPalette;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -102,11 +102,29 @@ public final class GenerateAccents {
         Hct hct = Hct.fromInt(seed);
         switch (variant) {
             case TONAL_SPOT:
-                return new SchemeTonalSpot(hct, dark, contrast);
+                return new com.google.android.material.color.utilities.DynamicScheme(
+                        hct, Variant.TONAL_SPOT, dark, contrast,
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 36),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 16),
+                        TonalPalette.fromHueAndChroma((hct.getHue() + 60) % 360, 24),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 6),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 8));
             case FIDELITY:
-                return new SchemeFidelity(hct, dark, contrast);
+                return new com.google.android.material.color.utilities.DynamicScheme(
+                        hct, Variant.FIDELITY, dark, contrast,
+                        TonalPalette.fromHueAndChroma(hct.getHue(), Math.max(hct.getChroma(), 48)),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 16),
+                        TonalPalette.fromHueAndChroma((hct.getHue() + 60) % 360, 24),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 4),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 8));
             case VIBRANT:
-                return new SchemeVibrant(hct, dark, contrast);
+                return new com.google.android.material.color.utilities.DynamicScheme(
+                        hct, Variant.VIBRANT, dark, contrast,
+                        TonalPalette.fromHueAndChroma(hct.getHue(), Math.max(hct.getChroma(), 48)),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 24),
+                        TonalPalette.fromHueAndChroma((hct.getHue() + 60) % 360, 40),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 10),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 12));
             case ACCENT: {
                 // The CorePalette recipe the base theme was built with (primary chroma >= 48, muted
                 // secondary, tertiary hue +60, neutrals 4/8) on TonalSpot's tone mapping. Primary
@@ -115,7 +133,7 @@ public final class GenerateAccents {
                 // it reproduces the base theme, so Default's contrast variants match its look.
                 double hue = hct.getHue();
                 double chroma = Math.max(48, Math.min(hct.getChroma(), accentChromaCap));
-                return new DynamicScheme(hct, com.google.android.material.color.utilities.Variant.TONAL_SPOT, dark, contrast,
+                return new com.google.android.material.color.utilities.DynamicScheme(hct, Variant.TONAL_SPOT, dark, contrast,
                     TonalPalette.fromHueAndChroma(hue, chroma),
                     TonalPalette.fromHueAndChroma(hue, 16),
                     TonalPalette.fromHueAndChroma((hue + 60) % 360, 24),
@@ -123,7 +141,13 @@ public final class GenerateAccents {
                     TonalPalette.fromHueAndChroma(hue, 8));
             }
             default:
-                return new SchemeContent(hct, dark, contrast);
+                return new com.google.android.material.color.utilities.DynamicScheme(
+                        hct, Variant.CONTENT, dark, contrast,
+                        TonalPalette.fromHueAndChroma(hct.getHue(), Math.max(hct.getChroma(), 48)),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 16),
+                        TonalPalette.fromHueAndChroma((hct.getHue() + 60) % 360, 24),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 4),
+                        TonalPalette.fromHueAndChroma(hct.getHue(), 8));
         }
     }
 
