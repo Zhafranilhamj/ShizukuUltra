@@ -11,8 +11,6 @@ pluginManagement {
         id "com.android.application" version "9.4.0"
         id "com.android.library" version "9.4.0"
         id "com.google.devtools.ksp" version "2.3.6"
-        id "dev.rikka.tools.autoresconfig" version "1.2.2"
-        id "dev.rikka.tools.materialthemebuilder" version "1.5.1"
         id "dev.rikka.tools.refine" version "4.4.0"
         id "io.sentry.android.gradle" version "6.2.0" apply false
         id "com.diffplug.spotless" version "6.25.0"
@@ -47,10 +45,22 @@ def props = new Properties()
 if (propFile.canRead()) {
     props.load(new FileInputStream(propFile))
 
-    if (props != null) {
-        if (props["api.useLocal"].equals("true")) {
-            root = props["api.dir"]
+    // local.properties is written by Android Studio/AGP with only `sdk.dir`, and CI writes its own
+    // copy, so `api.useLocal` is usually absent. Reading props["api.useLocal"] returns null there and
+    // `.equals("true")` on null threw NPE during settings evaluation - before any project was
+    // configured, with a stack trace that named neither the file nor the key. Compare against the
+    // literal instead, and only switch to a local checkout when a directory is actually given.
+    String useLocalApi = props.getProperty("api.useLocal")
+    String localApiDir = props.getProperty("api.dir")
+    if (useLocalApi != null) {
+        useLocalApi = useLocalApi.trim()
+    }
+    if ("true".equalsIgnoreCase(useLocalApi)) {
+        if (localApiDir == null || localApiDir.trim().isEmpty()) {
+            throw new GradleException("local.properties sets api.useLocal=true but not api.dir; " +
+                "point api.dir at a local ShizukuPlus-API checkout or remove api.useLocal.")
         }
+        root = localApiDir.trim()
     }
 }
 

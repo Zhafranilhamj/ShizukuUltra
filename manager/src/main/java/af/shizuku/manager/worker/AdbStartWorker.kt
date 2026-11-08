@@ -26,6 +26,7 @@ import android.content.IntentFilter
 import android.database.ContentObserver
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.work.*
 import kotlinx.coroutines.CancellationException
@@ -107,7 +108,7 @@ class AdbStartWorker(
                         assessment.reason == NetworkTrust.Reason.NOT_TRUSTED &&
                         assessment.ssid == null
                     ) {
-                        Timber.tag(TAG).i("NetworkTrust: SSID unresolvable while Shizuku is down; proceeding with local startup")
+                        Log.i(TAG_ADB_START, "NetworkTrust: SSID unresolvable while Shizuku is down; proceeding with local startup")
                     } else {
                         throw SecurityException("Wireless debugging start blocked: current network is untrusted (${assessment.reason})")
                     }
@@ -494,6 +495,8 @@ class AdbStartWorker(
     }
 
     companion object {
+        private const val TAG_ADB_START = "AdbStartWorker"
+
         /**
          * Asks for a background start. Returns at once: whether to enqueue is decided off the main
          * thread from WorkManager's state (nothing happens while a worker is already running), and

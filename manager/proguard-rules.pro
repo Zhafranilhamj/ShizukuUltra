@@ -115,17 +115,6 @@
     public <init>(android.content.Context, android.util.AttributeSet);
 }
 
-# Blanket guard for all Preference subclasses inflated from XML screens
--keep class * extends androidx.preference.Preference {
-    public <init>(android.content.Context, android.util.AttributeSet);
-    public <init>(android.content.Context, android.util.AttributeSet, int);
-    public <init>(android.content.Context, android.util.AttributeSet, int, int);
-}
-
-# Koin dependency injection keep rules
--dontwarn org.koin.**
--keep class org.koin.** { *; }
-
 # Keep WorkManager workers instantiated by name via reflection.
 # Both RemoteDbSyncWorker and AdbStartWorker must maintain their class names.
 -keep class * extends androidx.work.ListenableWorker {
@@ -160,9 +149,15 @@
     public static ** Companion;
 }
 
--keep interface com.airbnb.mvrx.** { *; }
+# The library resolves its own plumbing by name (the viewmodel provider loads a configured
+# MavericksViewModelConfigFactory, which walks StateRestorer/Args classes), so Mavericks keeps its
+# whole package. Three near-identical rules used to sit here:
+#   -keep interface com.airbnb.mvrx.** { *; }   ← redundant: "-keep class" already matches interfaces
+#   -keep class com.airbnb.mvrx.** { *; }       ← the rule that actually protects reflection
+#   -keepnames class com.airbnb.mvrx.** { *; }  ← redundant: "-keep" already keeps the names
+# Only the middle one survives; it is what keeps the release build from stripping the factory
+# discovery path (#200). Do not tighten it to name-only keeps without a device test.
 -keep class com.airbnb.mvrx.** { *; }
--keepnames class com.airbnb.mvrx.** { *; }
 
 # Mavericks state classes (e.g. HomeState) are validated at runtime as immutable Kotlin data
 # classes via reflection (assertMavericksDataClassImmutability reads the component/copy members).
@@ -189,17 +184,6 @@
 # Custom View subclasses inflated from XML by class name — R8 must not rename or remove them.
 -keep class af.shizuku.manager.utils.EmptyStateView { public <init>(android.content.Context, android.util.AttributeSet); }
 -keep class af.shizuku.manager.home.changelog.TimelineRailView { public <init>(android.content.Context, android.util.AttributeSet); }
-
-# Custom Preference subclasses inflated from XML by class name
--keep class * extends androidx.preference.Preference {
-    public <init>(android.content.Context, android.util.AttributeSet);
-    public <init>(android.content.Context, android.util.AttributeSet, int);
-    public <init>(android.content.Context, android.util.AttributeSet, int, int);
-}
-
-# Koin dependency injection
--dontwarn org.koin.**
--keep class org.koin.** { *; }
 
 -keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations,AnnotationDefault
 

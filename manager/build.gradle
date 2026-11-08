@@ -1,4 +1,3 @@
-import java.nio.file.Paths
 import org.gradle.process.ExecOperations
 import com.android.build.gradle.internal.tasks.CompileArtProfileTask
 
@@ -6,8 +5,6 @@ plugins {
     id "com.android.application"
     id "org.jetbrains.kotlin.plugin.compose" version "2.2.20"
     id "dev.rikka.tools.refine"
-    id "dev.rikka.tools.autoresconfig"
-    id "dev.rikka.tools.materialthemebuilder"
     id "io.sentry.android.gradle"
     id "org.jetbrains.kotlin.plugin.serialization" version "2.2.20"
     id "com.diffplug.spotless"
@@ -120,60 +117,212 @@ spotless {
     }
 }
 
-autoResConfig {
-    generatedClassFullName = "af.shizuku.manager.ShizukuLocales"
-    generateRes = false
-    generatedArrayFirstItem = "SYSTEM"
-    generateLocaleConfig = true
+
+// Generated Material 3 theme resources, replacing the dev.rikka.tools.materialthemebuilder plugin.
+//
+// That plugin (1.5.1, last published 2024) resolves AGP's legacy BaseExtension, which AGP 9
+// removed, so `id "dev.rikka.tools.materialthemebuilder"` failed configuration outright with
+// "Extension of type 'BaseExtension' does not exist" - nothing in this module could be configured
+// or built. Its `materialThemeBuilder { ... }` block is now scripts/dev/palette/GenerateTheme.java,
+// which writes the same resources (md_theme_* colours, palette* attributes and the dynamic-colour
+// values-v31 themes) from the same seed, and is run here into a generated
+// res directory that is part of the main source set. It needs nothing but the JDK: the colour
+// maths comes from material-color-utilities, vendored in scripts/dev/palette/mcu.
+def generatedThemeResDir = layout.buildDirectory.dir("generated/themeRes")
+
+def generateThemeRes = tasks.register("generateThemeRes", Exec) {
+    description = "Generates the Material 3 theme resources (md_theme_*, palette*, dynamic + accents)."
+    workingDir = rootProject.projectDir.absolutePath
+    def outDir = generatedThemeResDir.get().asFile
+    inputs.dir(file("${rootProject.projectDir}/scripts/dev/palette"))
+    inputs.file(file("${rootProject.projectDir}/scripts/dev/gen-theme-res.sh"))
+    outputs.dir(outDir)
+    doFirst {
+        outDir.mkdirs()
+    }
+    commandLine "bash", "scripts/dev/gen-theme-res.sh", outDir.absolutePath
 }
 
-materialThemeBuilder {
-    themes {
-        shizuku {
-            primaryColor = "#3F51B5"
-            lightThemeFormat = "Theme.Material3Expressive.Light.%s"
-            lightThemeParent = "Theme.Material3Expressive.Light"
-            darkThemeFormat = "Theme.Material3Expressive.Dark.%s"
-            darkThemeParent = "Theme.Material3Expressive.Dark"
-        }
-        dynamic_colors_overlay {
-            dynamicColors = true
-            lightThemeFormat = "ThemeOverlay.Material3.DynamicColors.Light.Shizuku"
-            lightThemeParent = "ThemeOverlay.Material3.DynamicColors.Light"
-            darkThemeFormat = "ThemeOverlay.Material3.DynamicColors.Dark.Shizuku"
-            darkThemeParent = "ThemeOverlay.Material3.DynamicColors.Dark"
+// srcDir() only accepts a path here - AGP 9 rejects Provider instances in the SourceSet API with
+// "You cannot add Provider instances to the Android SourceSet API" - so resolve it eagerly.
+android.sourceSets.main.res.srcDir(generatedThemeResDir.get().asFile.absolutePath)
+tasks.configureEach { task ->
+    // Every task in this project has to see the resources generated above. Depending on the
+    // generator is the cheapest correct answer: Gradle validates that no task reads another task's
+    // output without a declared dependency ("Property has implicit dependency" on
+    // :manager:map<Variant>SourceSetPaths was the first one), and the set of resource readers is
+    // not stable across AGP versions. The generator itself does no project work, so this cannot
+    // create a cycle, and javac only runs once per build.
+    if (task.name != "generateThemeRes") {
+        task.dependsOn(generateThemeRes)
+    }
+}
+
+// assets/rish_shizuku.dex: the shell helper the manager ships.
+//
+// The dex comes out of :shell's APK. It used to be written straight into manager/src/main/assets by
+// :shell's assemble task, which aapt2 rejected as 'Duplicate resources' for the asset merge - a
+// generated file appearing in a source asset directory confuses AGP's incremental mergers. Emit it
+// into a generated assets directory instead, one per build type.
+def registerShellDexTask = { String buildType, String shellAssembleTask ->
+    def outDir = layout.buildDirectory.dir("generated/dexAssets/${buildType}")
+    def apkDir = project(":shell").layout.buildDirectory.dir("outputs/apk/${buildType}")
+    return tasks.register("extractShellDex${buildType.capitalize()}") {
+        description = "Extracts rish_shizuku.dex from :shell's ${buildType} APK."
+        dependsOn(shellAssembleTask)
+        inputs.files(apkDir)
+        outputs.dir(outDir)
+        doLast {
+            def apk = (apkDir.get().asFile.listFiles({ File f ->
+                f.isFile() && f.name.endsWith(".apk")
+            } as FileFilter) ?: new File[0]).sort { it.lastModified() }.last()
+            def dex = zipTree(apk).matching { include "classes*.dex" }.files.sort { it.name }.first()
+            def target = new File(outDir.get().asFile, "rish_shizuku.dex")
+            target.parentFile.mkdirs()
+            target.bytes = dex.bytes
         }
     }
-    generatePalette = true
-    generateTextColors = true
 }
 
-def collapseReleaseResourceNames = tasks.register("collapseReleaseResourceNames") {
-    def aapt2 = Paths.get(project.android.sdkDirectory.path, "build-tools", project.android.buildToolsVersion, "aapt2")
-    def zip = Paths.get(project.buildDir.path, "intermediates",
-        "optimized_processed_res", "release", "optimizeReleaseResources", "resources-release-optimize.ap_")
-    doLast {
-        def optimized = new File("${zip}.opt")
-        def execOps = services.get(ExecOperations)
-        execOps.exec {
-            commandLine aapt2.toFile(), "optimize", "--collapse-resource-names",
-                "--resources-config-path", "aapt2-resources.cfg",
-                "-o", optimized, zip.toFile()
-            ignoreExitValue = false
+def shellDexDebug = registerShellDexTask("debug", ":shell:assembleDebug")
+def shellDexRelease = registerShellDexTask("release", ":shell:assembleRelease")
+
+android.sourceSets.debug.assets.srcDir(layout.buildDirectory.dir("generated/dexAssets/debug").get().asFile.absolutePath)
+android.sourceSets.release.assets.srcDir(layout.buildDirectory.dir("generated/dexAssets/release").get().asFile.absolutePath)
+
+// Overwrite the aapt2-optimised resource archive for one release variant, collapsing resource
+// names while honouring manager/aapt2-resources.cfg (see that file for the no_obfuscate list).
+//
+// Flavors matter here. Each flavor gets its own archive under
+// intermediates/optimized_processed_res/<variant>/optimizeReleaseResources/, and AGP registers one
+// optimize task per variant (optimizeShizukuplusReleaseResources, optimizeDropinReleaseResources).
+// The old hook looked for the unflavored "optimizeReleaseResources", which a flavored build never
+// has, so nothing was ever finalizedBy'd: the collapse step silently never ran, aapt2's
+// --resources-config-path was never applied - and `-x collapseReleaseResourceNames` in CI failed
+// task selection with "task not found" for a task that did exist. Now there is one collapse task
+// per release variant, wired from that variant's optimize task (per variant, not shared: a single
+// shared task would only run once per build and leave the second flavor uncollapsed).
+// Variant callbacks have to be registered before AGP configures the project. Doing it inside
+// afterEvaluate fails with "It is too late to add actions as the callbacks already executed", so
+// the variant/flavor names are collected here and used by the afterEvaluate block below.
+def releaseVariantNames = []
+def flavorNames = []
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        if (variant.buildType == "release") {
+            releaseVariantNames.add(
+                variant.name.substring(0, 1).toUpperCase() + variant.name.substring(1))
         }
-        if (optimized.exists()) {
-            delete(zip.toFile())
-            optimized.renameTo(zip.toFile())
+        if (variant.flavorName != null && !variant.flavorName.isEmpty()) {
+            flavorNames.add(
+                variant.flavorName.substring(0, 1).toUpperCase() + variant.flavorName.substring(1))
+        }
+    }
+}
+
+def registerCollapseTask = { String variantName ->
+    def taskName = "collapse${variantName.capitalize()}ResourceNames"
+    return tasks.register(taskName) {
+        def configFile = file("aapt2-resources.cfg")
+        // The archive path is resolved in doLast: AGP creates it during the build, so it cannot be
+        // declared as a task input at configuration time without an implicit (and fragile) task
+        // dependency on the resource optimizer.
+        def variantNameForTask = variantName
+        doLast {
+            // AGP 9 removed ApplicationExtension.sdkDirectory (and project.buildDir is gone from
+            // Gradle 9), so both come from the public APIs: the SDK Components provider for the SDK,
+            // and a scan of build-tools for an aapt2 binary (the configured build-tools version may
+            // not be the only one installed, and CI installs several).
+            def sdkDir = androidComponents.sdkComponents.sdkDirectory.get().asFile
+            def btRoot = new File(sdkDir, "build-tools")
+            def btVersions = (btRoot.listFiles() ?: []).findAll { it.isDirectory() }
+                .sort { it.name }.reverse()
+            def aapt2 = btVersions.collect { new File(it, "aapt2") }.find { it.canExecute() }
+            if (aapt2 == null) {
+                throw new GradleException("${taskName}: no aapt2 found under ${btRoot}")
+            }
+            def root = new File(layout.buildDirectory.get().asFile, "intermediates/optimized_processed_res")
+            def variantDirs = root.listFiles({ File f ->
+                f.isDirectory() && f.name.equalsIgnoreCase(variantNameForTask)
+            } as FileFilter)
+            if (variantDirs == null || variantDirs.length == 0) {
+                throw new GradleException(
+                    "${taskName}: no intermediates/optimized_processed_res/${variantNameForTask} " +
+                    "directory - the aapt2 resource-collapse step would have been skipped.")
+            }
+            def execOps = services.get(ExecOperations)
+            def archives = []
+            variantDirs.each { variantDir ->
+                // AGP 9 nests the archive deeper than AGP 8 did (the intermediate directory gained
+                // another level and the file name changed), so find every .ap_ under this variant
+                // instead of assuming .../optimizeReleaseResources/resources-release-optimize.ap_.
+                variantDir.eachFileRecurse { f ->
+                    if (f.isFile() && f.name.endsWith(".ap_")) archives << f
+                }
+            }
+            if (archives.isEmpty()) {
+                throw new GradleException(
+                    "${taskName}: no *.ap_ resource archive under ${root}/${variantNameForTask}")
+            }
+            archives.each { zip ->
+                def legacy = new File(zip.path + ".opt")
+                if (legacy.exists()) legacy.delete()
+                logger.lifecycle("${taskName}: collapsing resource names in ${zip}")
+                execOps.exec {
+                    commandLine aapt2, "optimize", "--collapse-resource-names",
+                        "--resources-config-path", configFile.absolutePath,
+                        "-o", legacy, zip
+                    ignoreExitValue = false
+                }
+                if (!legacy.exists()) {
+                    throw new GradleException("${taskName}: aapt2 produced no output for ${zip}")
+                }
+                delete(zip)
+                if (!legacy.renameTo(zip)) {
+                    throw new GradleException("${taskName}: could not replace ${zip}")
+                }
+            }
         }
     }
 }
 
 afterEvaluate {
-    def optimizeReleaseResources = tasks.findByName("optimizeReleaseResources")
-    if (optimizeReleaseResources != null) {
-        optimizeReleaseResources.finalizedBy(collapseReleaseResourceNames)
+    // Map each release variant to its optimize task by name: optimize<Variant>Resources.
+    //
+    // android.applicationVariants no longer exists in AGP 9 - reading it fails configuration with
+    // "Could not get unknown property 'applicationVariants' for object of type
+    // com.android.build.gradle.internal.dsl.ApplicationExtensionImpl$AgpDecorated" - so the variant
+    // list comes from the Android Components API instead, which is the supported surface.
+    def wiredVariants = [] as Set
+    releaseVariantNames.each { capitalizedName ->
+        def expected = "optimize${capitalizedName}Resources"
+        def optimizeTask = tasks.findByName(expected)
+        if (optimizeTask == null) {
+            // Different AGP versions capitalize/abbreviate a little differently; fall back to any
+            // optimize*ReleaseResources task whose name mentions this variant.
+            def normalized = capitalizedName.toLowerCase()
+            def match = tasks.names.find { n ->
+                n.startsWith("optimize") && n.endsWith("ReleaseResources") &&
+                    n.substring("optimize".length(), n.length() - "ReleaseResources".length())
+                        .toLowerCase() == normalized.replace("release", "")
+            }
+            if (match != null) {
+                optimizeTask = tasks.findByName(match)
+            }
+        }
+        if (optimizeTask == null) {
+            logger.warn("collapseReleaseResourceNames: no optimize*ReleaseResources task found for " +
+                "${capitalizedName}; aapt2 resource-name collapsing will not run for it.")
+            return
+        }
+        def collapseTask = registerCollapseTask(capitalizedName)
+        optimizeTask.finalizedBy(collapseTask)
+        wiredVariants.add(capitalizedName)
     }
-    
+    if (!releaseVariantNames.isEmpty() && wiredVariants.isEmpty()) {
+        logger.warn("collapseReleaseResourceNames: no release variant was wired to the collapse step.")
+    }
+
     tasks.register("copyCompatApkRelease", Copy) {
         dependsOn ":compat:assembleRelease"
         // Use fileTree so we match both compat-release.apk (signed) and compat-release-unsigned.apk.
@@ -194,6 +343,17 @@ afterEvaluate {
         rename { "compat.apk" }
     }
     
+    // Asset merging must also wait for compat.apk, which copyCompatApk* writes into
+    // src/main/assets. Match the build type: wiring both would build the release compat APK during
+    // a debug run (and make the two writers race for one file).
+    tasks.matching { it.name ==~ /merge\w+(Debug|Release)Assets/ }.configureEach { t ->
+        def release = t.name.endsWith("ReleaseAssets")
+        t.dependsOn(release ? "copyCompatApkRelease" : "copyCompatApkDebug")
+        // The generated assets directory is read by this task, so it must exist first (Gradle 9
+        // fails the build when a task reads another task's output undeclared).
+        t.dependsOn(release ? shellDexRelease : shellDexDebug)
+    }
+
     // Wire compat and shell for both the generic pre-build hooks (single-flavor builds)
     // and the flavor-specific hooks produced when product flavors are configured.
     tasks.findByName("preReleaseBuild")?.dependsOn("copyCompatApkRelease")
@@ -202,8 +362,7 @@ afterEvaluate {
     tasks.findByName("preDebugBuild")?.dependsOn("copyCompatApkDebug")
     tasks.findByName("preDebugBuild")?.dependsOn(":shell:assembleDebug")
 
-    android.productFlavors.each { flavor ->
-        def name = flavor.name.capitalize()
+    flavorNames.unique().each { name ->
         tasks.findByName("pre${name}ReleaseBuild")?.dependsOn("copyCompatApkRelease")
         tasks.findByName("pre${name}ReleaseBuild")?.dependsOn(":shell:assembleRelease")
         tasks.findByName("pre${name}DebugBuild")?.dependsOn("copyCompatApkDebug")

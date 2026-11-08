@@ -1,0 +1,253 @@
+name: CI Verify
+
+# Full verification for a branch: guard checks, unit tests, and both manager flavors compiled.
+# Kept separate from Release APK so a fast red/green signal exists while iterating, and separate
+# from Build App because that one is master-oriented (it tags and publishes on every push).
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, arena/fd31deed-shizukuultra]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=1g"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      # The wrapper resolves its distribution through services.gradle.org, which redirects to a
+      # GitHub release asset; that edge answers 504 for whole minutes, which killed the build before
+      # configuration ran. Unpack the distribution here with retries and put its bin directory on
+      # PATH, so every later step calls `gradle` on a verified local copy instead of the wrapper.
+      - name: Provision Gradle
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's#.*gradle-\(.*\)-bin\.zip#\1#p' gradle/wrapper/gradle-wrapper.properties)"
+          URL="$(sed -n 's#^distributionUrl=\(.*\)#\1#p' gradle/wrapper/gradle-wrapper.properties | sed 's#\\:#:#g')"
+          DEST="$RUNNER_TEMP/gradle-dist"
+          if [ -x "$DEST/gradle-${VERSION}/bin/gradle" ]; then
+            echo "using cached $DEST/gradle-${VERSION}"
+          else
+            for attempt in 1 2 3 4 5; do
+              echo "downloading $URL (attempt ${attempt})"
+              if curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/gradle.zip" "$URL"; then
+                unzip -q -o "$RUNNER_TEMP/gradle.zip" -d "$DEST" && break
+              fi
+              sleep $((attempt * 15))
+            done
+          fi
+          if [ ! -x "$DEST/gradle-${VERSION}/bin/gradle" ]; then
+            echo "::error title=Provision Gradle::could not download $URL after 5 attempts (distribution CDN is failing)"
+            exit 1
+          fi
+          echo "GRADLE_HOME=$DEST/gradle-${VERSION}" >> "$GITHUB_ENV"
+          echo "$DEST/gradle-${VERSION}/bin" >> "$GITHUB_PATH"
+          # Use this distribution directly (`gradle`) instead of `./gradlew`, which would go back
+          # to services.gradle.org for the same archive.
+
+      - name: Diagnose environment
+        run: |
+          {
+            echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
+            echo "java: $(java -version 2>&1 | head -1)"
+            echo "platforms: $(ls "${ANDROID_HOME:-/nonexistent}/platforms" 2>&1 | tr '\n' ' ')"
+            echo "build-tools: $(ls "${ANDROID_HOME:-/nonexistent}/build-tools" 2>&1 | tr '\n' ' ')"
+          } | tee /tmp/env.txt
+          while IFS= read -r line; do echo "::notice title=Env::$line"; done < /tmp/env.txt
+
+      - name: Accept SDK licenses
+        run: yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+
+      - name: Gradle configuration probe
+        run: |
+          # GitHub runs steps with `bash -e -o pipefail`, which aborts the script at the first
+          # failing command - before any of the reporting below could run, which is why earlier
+          # failures only ever said "exit code 1". Turn -e off and handle the status explicitly.
+          set +e
+          set -o pipefail
+          # Job logs are served from external blob storage and cannot always be read back, so the
+          # failing part of a Gradle log is re-emitted as annotations: the 30 lines before the
+          # "FAILURE:"/"What went wrong" block (where compiler errors are) plus the block itself, or
+          # the tail when neither appears. GitHub caps the annotations per check run, so nothing
+          # else is emitted.
+          report_gradle() {
+            local f="$1" title="$2" start from clean
+            # Gradle colours its output, and GitHub caps annotations per step, so strip ANSI, then
+            # report compiler diagnostics first (they are the only actionable lines).
+            clean=$(mktemp)
+            sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$f" > "$clean"
+            local diag
+            diag=$(grep -nEi 'e: |error:|unresolved reference|caused by: ' "$clean" | grep -vE '^\s+at ' | head -10)
+            if [ -n "$diag" ]; then
+              printf '%s\n' "$diag" | cut -d: -f2- | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+              rm -f "$clean"
+              return
+            fi
+            start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$clean" | head -1 | cut -d: -f1)
+            if [ -n "$start" ]; then
+              from=$((start - 25)); [ "$from" -lt 1 ] && from=1
+              sed -n "${from},$((start + 5))p" "$clean"
+            else
+              tail -20 "$clean"
+            fi | grep -vE '^\s+at |^\s*\.\.\. [0-9]+ (more|common frames)' \
+              | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+            rm -f "$clean"
+          }
+          # Retry only failures that are network flakiness in this step (a plugin/AAR that fails to
+          # download once), so a real configuration error still fails immediately.
+          for attempt in 1 2 3 4; do
+            gradle help --stacktrace --no-daemon --console=plain -Pkotlin.compiler.execution.strategy=in-process 2>&1 | tee config.log
+            rc=${PIPESTATUS[0]}
+            if [ "$rc" -eq 0 ]; then
+              break
+            fi
+            if grep -qE 'Server returned HTTP response code|Read timed out|Unable to load the wrapper' config.log; then
+              echo "::warning title=Configuration::Gradle distribution download failed (attempt ${attempt}); retrying"
+              sleep $((attempt * 20))
+              continue
+            fi
+            break
+          done
+          if [ "$rc" -ne 0 ]; then
+            # Annotate the tail unconditionally: a Gradle configuration failure does not always
+            # match a fixed set of patterns, and the raw log is not always readable back.
+            report_gradle config.log Configuration
+            exit "$rc"
+          fi
+
+      - name: Pre-push guard
+        env:
+          SKIP_GRADLE_CHECK: '1'
+        run: |
+          chmod +x pre-push-guard/scripts/pre_push_check.sh
+          bash pre-push-guard/scripts/pre_push_check.sh
+
+      - name: Translation arrays and generated locale list
+        run: |
+          python3 scripts/i18n/check_arrays.py
+          python3 scripts/i18n/generate_locales.py --check
+
+      - name: XML well-formedness
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET, sys
+          bad = []
+          for f in glob.glob('**/*.xml', recursive=True):
+              if '/build/' in f or f.startswith('api/') or f.startswith('_archive/'):
+                  continue
+              try:
+                  ET.parse(f)
+              except Exception as e:
+                  bad.append(f'{f}: {e}')
+          print('\n'.join(bad) if bad else 'all XML files parse')
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Unit tests
+        run: |
+          # GitHub runs steps with `bash -e -o pipefail`, which aborts the script at the first
+          # failing command - before any of the reporting below could run, which is why earlier
+          # failures only ever said "exit code 1". Turn -e off and handle the status explicitly.
+          set +e
+          set -o pipefail
+          # Job logs are served from external blob storage and cannot always be read back, so the
+          # failing part of a Gradle log is re-emitted as annotations: the 30 lines before the
+          # "FAILURE:"/"What went wrong" block (where compiler errors are) plus the block itself, or
+          # the tail when neither appears. GitHub caps the annotations per check run, so nothing
+          # else is emitted.
+          # Kotlin reports diagnostics with absolute file URLs on lines starting "e: ", which is
+          # where the actionable message always is; prefer those, and fall back to the block around
+          # FAILURE when the build failed for another reason.
+          report_gradle() {
+            local f="$1" title="$2" start
+            local diag
+            diag=$(grep -oE 'e: file:///[^ ]+ .*' "$f" | head -10)
+            if [ -n "$diag" ]; then
+              printf '%s\n' "$diag" | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+              return
+            fi
+            start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
+            if [ -n "$start" ]; then
+              from=$((start - 20)); [ "$from" -lt 1 ] && from=1
+              sed -n "${from},$((start + 10))p" "$f"
+            else
+              tail -20 "$f"
+            fi | grep -vE '^\s+at ' | tac | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+          }
+          gradle --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest \
+            :database:testDebugUnitTest --stacktrace --console=plain -Pkotlin.compiler.execution.strategy=in-process 2>&1 | tee test.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            {
+              echo "## Unit tests failed"
+              echo '```'
+              grep -E "FAILED|^e: |error:|\* What went wrong|Execution failed|Caused by|Could not (download|resolve|GET)|Tests? .*failed" -A4 test.log | tail -160
+              echo '```'
+              echo
+              echo "First failing test output:"
+              echo '```'
+              awk '/FAILED/{flag=1} flag' test.log | head -80
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            report_gradle test.log Test
+            exit "$rc"
+          fi
+
+      - name: Build debug APKs
+        run: |
+          # Same failure reporting as above: annotate rather than leave a bare exit code.
+          set +e
+          set -o pipefail
+          report_gradle() {
+            local f="$1" title="$2" start
+            local diag
+            diag=$(grep -oE 'e: file:///[^ ]+ .*' "$f" | head -10)
+            if [ -n "$diag" ]; then
+              printf '%s\n' "$diag" | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+              return
+            fi
+            start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
+            if [ -n "$start" ]; then
+              from=$((start - 20)); [ "$from" -lt 1 ] && from=1
+              sed -n "${from},$((start + 10))p" "$f"
+            else
+              tail -20 "$f"
+            fi | grep -vE '^\s+at ' | tac | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+          }
+          gradle :manager:assembleShizukuplusDebug :manager:assembleDropinDebug --stacktrace --console=plain -Pkotlin.compiler.execution.strategy=in-process -x :manager:lint 2>&1 | tee debug.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            report_gradle debug.log Debug
+            exit "$rc"
+          fi
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verify-test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+            **/build/reports/lint-results*
+            debug.log
+            test.log
+          retention-days: 7

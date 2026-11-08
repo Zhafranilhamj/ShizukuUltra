@@ -1,0 +1,371 @@
+name: Release APK
+
+# Builds installable, R8-minified release APKs (Plus + Drop-In + Compat Hub) and publishes them,
+# for this fork and for anyone who needs a signed build out of a branch.
+#
+# Signing: with the KEYSTORE / KEYSTORE_PASSWORD / KEYSTORE_ALIAS / KEYSTORE_ALIAS_PASSWORD
+# secrets configured, the APKs are signed with the project's release key and can update an
+# installed Shizuku+ (af.shizuku.plus.api) or stock-Shizuku replacement (moe.shizuku.privileged.api)
+# in place. Without them, the run generates a throwaway keystore so the APKs are still installable
+# (a fresh install - Android will refuse to update an app signed with a different key), and says so
+# in the release notes and the job summary. signing.gradle refuses to build a release on CI without
+# *some* signing.properties, which is why the fallback exists here rather than being implicit.
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Prerelease'
+        type: boolean
+        required: false
+        default: true
+      attach_release:
+        description: 'Publish a GitHub release with the APKs attached'
+        type: boolean
+        required: false
+        default: true
+  push:
+    # master publishes; other branches listed here only build artifacts (see the publish step).
+    branches: [master, arena/fd31deed-shizukuultra]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+permissions:
+  contents: write
+
+env:
+  GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      signed_with: ${{ steps.keystore.outputs.signed_with }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      # The wrapper resolves its distribution through services.gradle.org, which redirects to a
+      # GitHub release asset; that edge answers 504 for whole minutes, which killed the build before
+      # configuration ran. Unpack the distribution here with retries and put its bin directory on
+      # PATH, so every later step calls `gradle` on a verified local copy instead of the wrapper.
+      - name: Provision Gradle
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's#.*gradle-\(.*\)-bin\.zip#\1#p' gradle/wrapper/gradle-wrapper.properties)"
+          URL="$(sed -n 's#^distributionUrl=\(.*\)#\1#p' gradle/wrapper/gradle-wrapper.properties | sed 's#\\:#:#g')"
+          DEST="$RUNNER_TEMP/gradle-dist"
+          if [ -x "$DEST/gradle-${VERSION}/bin/gradle" ]; then
+            echo "using cached $DEST/gradle-${VERSION}"
+          else
+            for attempt in 1 2 3 4 5; do
+              echo "downloading $URL (attempt ${attempt})"
+              if curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/gradle.zip" "$URL"; then
+                unzip -q -o "$RUNNER_TEMP/gradle.zip" -d "$DEST" && break
+              fi
+              sleep $((attempt * 15))
+            done
+          fi
+          if [ ! -x "$DEST/gradle-${VERSION}/bin/gradle" ]; then
+            echo "::error title=Provision Gradle::could not download $URL after 5 attempts (distribution CDN is failing)"
+            exit 1
+          fi
+          echo "GRADLE_HOME=$DEST/gradle-${VERSION}" >> "$GITHUB_ENV"
+          echo "$DEST/gradle-${VERSION}/bin" >> "$GITHUB_PATH"
+          # Use this distribution directly (`gradle`) instead of `./gradlew`, which would go back
+          # to services.gradle.org for the same archive.
+
+      - name: Diagnose environment
+        run: |
+          {
+            echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
+            echo "java: $(java -version 2>&1 | head -1)"
+            echo "sdkmanager: $(ls "${ANDROID_HOME:-/nonexistent}/cmdline-tools/latest/bin/sdkmanager" 2>&1)"
+            echo "platforms: $(ls "${ANDROID_HOME:-/nonexistent}/platforms" 2>&1 | tr '\n' ' ')"
+            echo "build-tools: $(ls "${ANDROID_HOME:-/nonexistent}/build-tools" 2>&1 | tr '\n' ' ')"
+            echo "compileSdk: $(grep -oP 'compileSdk\s*=?\s*\K[0-9]+' build.gradle manager/build.gradle gradle/libs.versions.toml 2>/dev/null | head -3 | tr '\n' ' ')"
+          } | tee /tmp/env.txt
+          while IFS= read -r line; do echo "::notice title=Env::$line"; done < /tmp/env.txt
+
+      - name: Accept SDK licenses
+        run: |
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --list_installed 2>/dev/null | head -30 \
+            | while IFS= read -r l; do echo "::notice title=SDK::$l"; done
+
+      # Configuration only (no compile): catches a broken settings.gradle/build.gradle in seconds
+      # and reports the reason as annotations, before paying for a full build.
+      - name: Gradle configuration probe
+        run: |
+          # GitHub runs steps with `bash -e -o pipefail`, which aborts the script at the first
+          # failing command - before any of the reporting below could run, which is why earlier
+          # failures only ever said "exit code 1". Turn -e off and handle the status explicitly.
+          set +e
+          set -o pipefail
+          # Job logs are served from external blob storage and cannot always be read back, so the
+          # failing part of a Gradle log is re-emitted as annotations: the 30 lines before the
+          # "FAILURE:"/"What went wrong" block (where compiler errors are) plus the block itself, or
+          # the tail when neither appears. GitHub caps the annotations per check run, so nothing
+          # else is emitted.
+          # Kotlin reports diagnostics with absolute file URLs on lines starting "e: ", which is
+          # where the actionable message always is; prefer those, and fall back to the block around
+          # FAILURE when the build failed for another reason.
+          report_gradle() {
+            local f="$1" title="$2" start
+            local diag
+            diag=$(grep -oE 'e: file:///[^ ]+ .*' "$f" | head -10)
+            if [ -n "$diag" ]; then
+              printf '%s\n' "$diag" | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+              return
+            fi
+            start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
+            if [ -n "$start" ]; then
+              from=$((start - 20)); [ "$from" -lt 1 ] && from=1
+              sed -n "${from},$((start + 10))p" "$f"
+            else
+              tail -20 "$f"
+            fi | grep -vE '^\s+at ' | tac | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+          }
+          # Retry only failures that are network flakiness in this step (a plugin/AAR that fails to
+          # download once), so a real configuration error still fails immediately.
+          for attempt in 1 2 3 4; do
+            gradle help --stacktrace --no-daemon --console=plain -Pkotlin.compiler.execution.strategy=in-process 2>&1 | tee config.log
+            rc=${PIPESTATUS[0]}
+            if [ "$rc" -eq 0 ]; then
+              break
+            fi
+            if grep -qE 'Server returned HTTP response code|Read timed out|Unable to load the wrapper' config.log; then
+              echo "::warning title=Configuration::Gradle distribution download failed (attempt ${attempt}); retrying"
+              sleep $((attempt * 20))
+              continue
+            fi
+            break
+          done
+          if [ "$rc" -ne 0 ]; then
+            # Annotate the tail unconditionally: a Gradle configuration failure does not always
+            # match a fixed set of patterns, and the raw log is not always readable back.
+            report_gradle config.log Configuration
+            exit "$rc"
+          fi
+          grep -E "^> Task|BUILD SUCCESSFUL" config.log | tail -5 \
+            | while IFS= read -r line; do echo "::notice title=Config::$line"; done
+
+      # Static checks first: a malformed layout or a translated value array is a two-second failure
+      # here instead of a twenty-minute build failure later.
+      - name: Pre-push guard (static checks)
+        env:
+          SKIP_GRADLE_CHECK: '1'
+        run: |
+          chmod +x pre-push-guard/scripts/pre_push_check.sh
+          bash pre-push-guard/scripts/pre_push_check.sh
+
+      - name: Check translation arrays and generated locale list
+        run: |
+          python3 scripts/i18n/check_arrays.py
+          python3 scripts/i18n/generate_locales.py --check
+
+      - name: Create signing.properties
+        id: keystore
+        env:
+          HAS_KEYSTORE: ${{ secrets.KEYSTORE != '' }}
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KS_ALIAS_PASS: ${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
+        run: |
+          # Anything printed here is re-emitted as an annotation on failure, because the raw log
+          # lives on blob storage that not every environment can read back.
+          {
+            set -euo pipefail
+            if [ "${HAS_KEYSTORE:-false}" = "true" ]; then
+              printf '%s' "$KEYSTORE" | base64 --decode > key.jks
+              store_pass="$KS_PASS"; alias_name="$KS_ALIAS"; alias_pass="$KS_ALIAS_PASS"
+              echo "signed_with=project release key" >> "$GITHUB_OUTPUT"
+              echo "Using the project release key."
+            else
+              # signing.gradle refuses a CI release build without signing.properties, so a
+              # throwaway key keeps the build possible; it installs but cannot update an existing
+              # install signed with the real key.
+              keytool -genkeypair -noprompt -keystore key.jks -storepass "cithrowaway" \
+                -alias "ci" -keypass "cithrowaway" -keyalg RSA -keysize 2048 -validity 10000 \
+                -dname "CN=ShizukuPlus CI, O=ShizukuPlus, C=US"
+              store_pass="cithrowaway"; alias_name="ci"; alias_pass="cithrowaway"
+              echo "No KEYSTORE secret: signing with a throwaway key (fresh install only)."
+              echo "signed_with=throwaway CI key (no KEYSTORE secret)" >> "$GITHUB_OUTPUT"
+            fi
+            {
+              printf 'KEYSTORE_PASSWORD=%s\n' "$store_pass"
+              printf 'KEYSTORE_ALIAS=%s\n' "$alias_name"
+              printf 'KEYSTORE_ALIAS_PASSWORD=%s\n' "$alias_pass"
+              printf 'KEYSTORE_FILE=%s\n' "$GITHUB_WORKSPACE/key.jks"
+            } > signing.properties
+            ls -l key.jks signing.properties
+            keytool -list -keystore key.jks -storepass "$store_pass" | tail -3
+          } 2>&1 | tee /tmp/sign.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then tail -30 /tmp/sign.log | sed 's/^/::error::/'; fi
+          exit "$rc"
+
+      - name: Read version
+        id: version
+        run: |
+          set -euo pipefail
+          GIT_COUNT=$(git rev-list --count HEAD)
+          # Keep in sync with upstreamVersion in build.gradle.
+          UPSTREAM_VERSION=$(grep -oP 'def upstreamVersion = "\K[0-9.]+' build.gradle | head -1)
+          VERSION="${UPSTREAM_VERSION}.r${GIT_COUNT}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building ${VERSION}"
+
+      - name: Build release APKs
+        run: |
+          # GitHub runs steps with `bash -e -o pipefail`, which aborts the script at the first
+          # failing command - before any of the reporting below could run, which is why earlier
+          # failures only ever said "exit code 1". Turn -e off and handle the status explicitly.
+          set +e
+          set -o pipefail
+          # Job logs are served from external blob storage and cannot always be read back, so the
+          # failing part of a Gradle log is re-emitted as annotations: the 30 lines before the
+          # "FAILURE:"/"What went wrong" block (where compiler errors are) plus the block itself, or
+          # the tail when neither appears. GitHub caps the annotations per check run, so nothing
+          # else is emitted.
+          report_gradle() {
+            local f="$1" title="$2" start
+            start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
+            if [ -n "$start" ]; then
+              sed -n "${start},$((start + 24))p" "$f"
+            else
+              tail -25 "$f"
+            fi | grep -vE '^\s+at ' | tac | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+          }
+          echo "+ gradle :manager:assembleShizukuplusRelease :manager:assembleDropinRelease --stacktrace"
+          gradle :manager:assembleShizukuplusRelease :manager:assembleDropinRelease \
+            :compat:assembleRelease --stacktrace --no-daemon --console=plain -Pkotlin.compiler.execution.strategy=in-process -x :manager:lint 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            # Surface the failure through annotations and the job summary: the raw log is served
+            # from external blob storage, which an API-only client cannot always read back.
+            {
+              echo "## Build failed"
+              echo '```'
+              grep -E "^(e|w): |error:|FAILURE|\* What went wrong|Execution failed|Caused by|Could not (download|resolve|GET)|> Task .* FAILED" -A5 build.log \
+                | tail -120
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            report_gradle build.log Gradle
+            exit "$rc"
+          fi
+          ls -l manager/build/outputs/apk/*/release/ compat/build/outputs/apk/release/
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build-logs
+          path: |
+            build.log
+            config.log
+          if-no-files-found: ignore
+
+      - name: Collect APKs
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set +e
+          set -o pipefail
+          mkdir -p dist
+          pick() { find "$1" -name '*.apk' -type f 2>/dev/null | head -1; }
+          PLUS=$(pick manager/build/outputs/apk/shizukuplus/release)
+          DROPIN=$(pick manager/build/outputs/apk/dropin/release)
+          COMPAT=$(pick compat/build/outputs/apk/release)
+          [ -z "$PLUS" ] && { echo "::error::Plus APK missing under manager/build/outputs/apk/shizukuplus/release"; exit 1; }
+          [ -z "$DROPIN" ] && { echo "::error::Drop-In APK missing under manager/build/outputs/apk/dropin/release"; exit 1; }
+          cp "$PLUS" "dist/ShizukuPlus-${VERSION}.apk"
+          cp "$DROPIN" "dist/ShizukuPlus-DropIn-${VERSION}.apk"
+          [ -n "$COMPAT" ] && cp "$COMPAT" "dist/ShizukuPlus-CompatHub-${VERSION}.apk" || true
+
+          # Every APK must verify as signed, and its applicationId is printed so a wrong-flavor
+          # artifact can never be published under the other name again (#340).
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          APKSIGNER="$ANDROID_HOME/build-tools/$BT/apksigner"
+          AAPT2="$ANDROID_HOME/build-tools/$BT/aapt2"
+          {
+            echo "| File | applicationId |"
+            echo "|:--|:--|"
+          } > rows.md
+          for f in dist/*.apk; do
+            if ! "$APKSIGNER" verify --print-certs "$f" > cert.txt 2>&1; then
+              echo "::error::$(basename "$f") is not signed: $(tail -3 cert.txt)"
+              exit 1
+            fi
+            pkg=$("$AAPT2" dump packagename "$f" 2>/dev/null || echo "?")
+            echo "$(basename "$f") -> $pkg ($(du -h "$f" | cut -f1))"
+            echo "| $(basename "$f") | $pkg |" >> rows.md
+          done
+          {
+            echo "### Release APKs (${VERSION})"
+            echo
+            cat rows.md
+            echo
+            echo "Signed with: ${{ steps.keystore.outputs.signed_with }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shizukuplus-release-apks
+          path: dist/*.apk
+          retention-days: 30
+
+      - name: Publish release
+        # Only master publishes on push; a branch build produces artifacts for review. A manual run
+        # can ask for a release from any branch (that is how this branch yields an installable APK).
+        if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref_name == 'master') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SIGNED_WITH: ${{ steps.keystore.outputs.signed_with }}
+          PRERELEASE: ${{ github.event_name == 'push' || github.event.inputs.prerelease == 'true' }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}-fork.${GITHUB_RUN_NUMBER}"
+          {
+            echo "Built from \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA}."
+            echo
+            echo "| File | What it is |"
+            echo "|:--|:--|"
+            echo "| \`ShizukuPlus-${VERSION}.apk\` | Shizuku+ (\`af.shizuku.plus.api\`) — installs alongside stock Shizuku |"
+            echo "| \`ShizukuPlus-DropIn-${VERSION}.apk\` | Drop-In flavor (\`moe.shizuku.privileged.api\`) — replaces stock Shizuku |"
+            echo "| \`ShizukuPlus-CompatHub-${VERSION}.apk\` | Compat Hub stub, bundles the Shizuku API for older clients |"
+            echo
+            echo "**Signing:** ${SIGNED_WITH}."
+            if [ "${SIGNED_WITH#throwaway}" != "${SIGNED_WITH}" ]; then
+              echo
+              echo "> This build is signed with a throwaway key, so it installs as a new app but Android"
+              echo "> refuses to update an existing Shizuku+ install with it. Add the \`KEYSTORE\` secrets to"
+              echo "> sign with the project key."
+            fi
+            echo
+            echo "Release build: R8 minified, shrunk resources, aapt2 resource-name collapsing applied."
+          } > notes.md
+          PRE=()
+          [ "$PRERELEASE" = "true" ] && PRE=(--prerelease)
+          gh release create "$TAG" dist/*.apk --title "Shizuku+ ${VERSION} (${GITHUB_REF_NAME})" \
+            --notes-file notes.md "${PRE[@]}"

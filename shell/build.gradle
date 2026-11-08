@@ -29,30 +29,37 @@ android {
     }
 }
 
-android.applicationVariants.all { variant ->
-    variant.outputs.all {
-        def outDir = new File(rootDir, "out")
-        def mappingPath = new File(outDir, "mapping").absolutePath
-        def dexPath = "${rootProject.rootDir.path}/manager/src/main/assets"
-        variant.assembleProvider.get().doLast {
-            if (variant.getBuildType().isMinifyEnabled()) {
-                copy {
-                    from variant.mappingFileProvider.get()
-                    into mappingPath
-                    rename { String fileName ->
-                        mappingPath + File.separator + "cmd-v${variant.versionName}.txt"
-                    }
-                }
-            }
-            copy {
-                def file = zipTree(file(outputFile)).matching { include "classes*.dex" }.singleFile
+// Keep R8's mapping file for release builds.
+//
+// This used to walk android.applicationVariants, which AGP 9 removed; reading it fails
+// configuration with "Could not get unknown property 'applicationVariants'". The Android
+// Components API gives the variants instead.
+//
+// The dex itself is no longer extracted here: the manager reads it out of this module's APK into a
+// generated assets directory (see manager/build.gradle). Writing it into
+// manager/src/main/assets used to make aapt2 fail with 'Duplicate resources' for the asset merge,
+// because the file appeared in the source tree while the merger was reading it.
+def exportMapping = { String buildType ->
+    def mapping = layout.buildDirectory.file("outputs/mapping/${buildType}/mapping.txt").get().asFile
+    if (!mapping.exists()) {
+        return
+    }
+    def mappingDir = new File(rootDir, "out/mapping")
+    mappingDir.mkdirs()
+    java.nio.file.Files.copy(mapping.toPath(),
+        new File(mappingDir, "cmd-v${rootProject.ext.versionName}.txt").toPath(),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    mapping.delete()
+}
 
-                from file
-                into dexPath
-                rename { String fileName ->
-                    fileName.replace(file.getName(), "rish_shizuku.dex")
-                }
-            }
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def buildType = variant.buildType
+        // tasks.named() would throw UnknownTaskException here - AGP creates assemble<Variant> later,
+        // after the variant callbacks run - so match on the name instead.
+        def assembleName = "assemble${variant.name.capitalize()}"
+        tasks.matching { it.name == assembleName }.configureEach { task ->
+            task.doLast { exportMapping(buildType) }
         }
     }
 }

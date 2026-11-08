@@ -40,6 +40,29 @@ jobs:
           chmod +x pre-push-guard/scripts/pre_push_check.sh
           bash pre-push-guard/scripts/pre_push_check.sh
 
+      # workflow_dispatch boolean inputs arrive as the strings 'true'/'false', and
+      # `github.event.inputs.x == true` compares a string to a boolean, which is always false.
+      # Every dispatch therefore silently ran the release path with debug=false and
+      # prerelease=false no matter what was picked. The comparisons are fixed ('true'), and this
+      # job prints what the run will actually do so a wrong assumption shows up in the log instead
+      # of in the published release.
+      - name: Resolve dispatch inputs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          IN_DEBUG: ${{ github.event.inputs.debug }}
+          IN_PRERELEASE: ${{ github.event.inputs.prerelease }}
+        run: |
+          echo "event=${EVENT_NAME} ref=${REF_NAME} debug=${IN_DEBUG:-<unset>} prerelease=${IN_PRERELEASE:-<unset>}"
+          case "${IN_DEBUG:-}" in
+            ""|true|false) ;;
+            *) echo "::error::debug input must be 'true' or 'false', got '${IN_DEBUG}'"; exit 1 ;;
+          esac
+          case "${IN_PRERELEASE:-}" in
+            ""|true|false) ;;
+            *) echo "::error::prerelease input must be 'true' or 'false', got '${IN_PRERELEASE}'"; exit 1 ;;
+          esac
+
   lint:
     needs: [pre-push-guard]
     runs-on: ubuntu-latest
@@ -118,7 +141,7 @@ jobs:
       HAS_CROWDIN: ${{ secrets.CROWDIN_TOKEN != '' && secrets.CROWDIN_PROJECT_ID != '' }}
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-      IS_DEBUG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug == true }}
+      IS_DEBUG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug == 'true' }}
       # github.ref_name != 'master' forces prerelease regardless of trigger/inputs - workflow_dispatch's
       # prerelease input defaults to false, which is the intentional "promote to stable" mechanism
       # for master, but nothing previously stopped that same default from applying to a manual
@@ -126,7 +149,7 @@ jobs:
       # (v13.6.0.r2344, later deleted) built from an in-progress branch - a manual `gh workflow run
       # --ref <branch>` to sanity-check compilation, with no intent to cut a release at all, silently
       # became one because the default is stable-not-prerelease. Non-master can never be stable now.
-      IS_PRERELEASE: ${{ github.ref_name != 'master' || (github.event_name == 'push' && github.ref_name == 'master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == true) }}
+      IS_PRERELEASE: ${{ github.ref_name != 'master' || (github.event_name == 'push' && github.ref_name == 'master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == 'true') }}
 
     outputs:
       artifactName: ${{ steps.buildWithGradle.outputs.artifactName }}
@@ -421,7 +444,7 @@ jobs:
          !contains(github.event.head_commit.message, '[skip release]')) ||
         (github.event_name == 'push' && github.ref_name == 'master' &&
          contains(github.event.head_commit.message, '[force release]')) ||
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.debug != true)
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.debug != 'true')
       )
     runs-on: ubuntu-latest
     permissions:
@@ -435,7 +458,7 @@ jobs:
       # (v13.6.0.r2344, later deleted) built from an in-progress branch - a manual `gh workflow run
       # --ref <branch>` to sanity-check compilation, with no intent to cut a release at all, silently
       # became one because the default is stable-not-prerelease. Non-master can never be stable now.
-      IS_PRERELEASE: ${{ github.ref_name != 'master' || (github.event_name == 'push' && github.ref_name == 'master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == true) }}
+      IS_PRERELEASE: ${{ github.ref_name != 'master' || (github.event_name == 'push' && github.ref_name == 'master') || (github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == 'true') }}
 
     steps:
       - name: Checkout
