@@ -54,9 +54,12 @@ if (propFile.canRead()) {
     // `.equals("true")` on null threw NPE during settings evaluation - before any project was
     // configured, with a stack trace that named neither the file nor the key. Compare against the
     // literal instead, and only switch to a local checkout when a directory is actually given.
-    def useLocalApi = props.getProperty("api.useLocal")
-    def localApiDir = props.getProperty("api.dir")
-    if ("true".equalsIgnoreCase(useLocalApi?.trim())) {
+    String useLocalApi = props.getProperty("api.useLocal")
+    String localApiDir = props.getProperty("api.dir")
+    if (useLocalApi != null) {
+        useLocalApi = useLocalApi.trim()
+    }
+    if ("true".equalsIgnoreCase(useLocalApi)) {
         if (localApiDir == null || localApiDir.trim().isEmpty()) {
             throw new GradleException("local.properties sets api.useLocal=true but not api.dir; " +
                 "point api.dir at a local ShizukuPlus-API checkout or remove api.useLocal.")
