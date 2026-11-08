@@ -141,7 +141,7 @@ jobs:
               sed -n "${from},$((start + 10))p" "$f"
             else
               tail -20 "$f"
-            fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+            fi | grep -vE '^\s+at ' | tac | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
           # Retry only failures that are network flakiness in this step (a plugin/AAR that fails to
           # download once), so a real configuration error still fails immediately.
@@ -253,7 +253,7 @@ jobs:
               sed -n "${start},$((start + 24))p" "$f"
             else
               tail -25 "$f"
-            fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+            fi | grep -vE '^\s+at ' | tac | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
           echo "+ gradle :manager:assembleShizukuplusRelease :manager:assembleDropinRelease --stacktrace"
           gradle :manager:assembleShizukuplusRelease :manager:assembleDropinRelease \

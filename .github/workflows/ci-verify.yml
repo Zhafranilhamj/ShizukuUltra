@@ -190,7 +190,7 @@ jobs:
               sed -n "${from},$((start + 10))p" "$f"
             else
               tail -20 "$f"
-            fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+            fi | grep -vE '^\s+at ' | tac | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
           gradle --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest \
             :database:testDebugUnitTest --stacktrace --console=plain -Pkotlin.compiler.execution.strategy=in-process 2>&1 | tee test.log
@@ -230,7 +230,7 @@ jobs:
               sed -n "${from},$((start + 10))p" "$f"
             else
               tail -20 "$f"
-            fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
+            fi | grep -vE '^\s+at ' | tac | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
           gradle :manager:assembleShizukuplusDebug :manager:assembleDropinDebug --stacktrace --console=plain -Pkotlin.compiler.execution.strategy=in-process -x :manager:lint 2>&1 | tee debug.log
           rc=${PIPESTATUS[0]}
