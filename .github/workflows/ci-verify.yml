@@ -52,8 +52,9 @@ jobs:
           ./gradlew help --stacktrace --no-daemon 2>&1 | tee config.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
-            grep -E "^(e|w): |error:|FAILURE|\* What went wrong|Caused by|Execution failed|Could not" -A6 config.log \
-              | head -60 | while IFS= read -r line; do echo "::error title=Configuration::$line"; done
+            # Annotate the tail unconditionally: a Gradle configuration failure does not always
+            # match a fixed set of patterns, and the raw log is not always readable back.
+            tail -60 config.log | while IFS= read -r line; do echo "::error title=Configuration::$line"; done
             exit "$rc"
           fi
 
@@ -101,8 +102,7 @@ jobs:
               awk '/FAILED/{flag=1} flag' test.log | head -80
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            grep -E "FAILED|^e: |error:|\* What went wrong|Execution failed" test.log | tail -60 \
-              | while IFS= read -r line; do echo "::error title=Test::$line"; done
+            tail -60 test.log | while IFS= read -r line; do echo "::error title=Test::$line"; done
             exit "$rc"
           fi
 

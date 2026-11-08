@@ -88,8 +88,9 @@ jobs:
           ./gradlew help --stacktrace --no-daemon 2>&1 | tee config.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
-            grep -E "^(e|w): |error:|FAILURE|\* What went wrong|Caused by|Execution failed|Could not" -A6 config.log \
-              | head -60 | while IFS= read -r line; do echo "::error title=Configuration::$line"; done
+            # Annotate the tail unconditionally: a Gradle configuration failure does not always
+            # match a fixed set of patterns, and the raw log is not always readable back.
+            tail -60 config.log | while IFS= read -r line; do echo "::error title=Configuration::$line"; done
             exit "$rc"
           fi
           grep -E "^> Task|BUILD SUCCESSFUL" config.log | tail -5 \
@@ -176,8 +177,7 @@ jobs:
                 | tail -120
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            grep -E "^(e|w): |error:|FAILURE|\* What went wrong|Execution failed|Caused by|> Task .* FAILED" -A3 build.log \
-              | tail -80 | while IFS= read -r line; do echo "::error title=Gradle::$line"; done
+            tail -100 build.log | while IFS= read -r line; do echo "::error title=Gradle::$line"; done
             exit "$rc"
           fi
           ls -l manager/build/outputs/apk/*/release/ compat/build/outputs/apk/release/
