@@ -237,7 +237,7 @@ def registerCollapseTask = { String variantName ->
                 if (legacy.exists()) legacy.delete()
                 logger.lifecycle("${taskName}: collapsing resource names in ${zip}")
                 execOps.exec {
-                    commandLine aapt2.toFile(), "optimize", "--collapse-resource-names",
+                    commandLine aapt2, "optimize", "--collapse-resource-names",
                         "--resources-config-path", configFile.absolutePath,
                         "-o", legacy, zip
                     ignoreExitValue = false
@@ -311,6 +311,15 @@ afterEvaluate {
         rename { "compat.apk" }
     }
     
+    // Asset merging must also wait for the shell/compat assets: both are written into
+    // src/main/assets by their tasks, and with org.gradle.parallel=true the merge could enumerate
+    // the directory while it was being written, which surfaced as 'Duplicate resources' for
+    // rish_shizuku.dex.
+    tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach { t ->
+        t.dependsOn(":shell:assembleRelease", ":shell:assembleDebug")
+        t.dependsOn("copyCompatApkRelease", "copyCompatApkDebug")
+    }
+
     // Wire compat and shell for both the generic pre-build hooks (single-flavor builds)
     // and the flavor-specific hooks produced when product flavors are configured.
     tasks.findByName("preReleaseBuild")?.dependsOn("copyCompatApkRelease")
