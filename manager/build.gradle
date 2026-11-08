@@ -6,7 +6,6 @@ plugins {
     id "com.android.application"
     id "org.jetbrains.kotlin.plugin.compose" version "2.2.20"
     id "dev.rikka.tools.refine"
-    id "dev.rikka.tools.autoresconfig"
     id "dev.rikka.tools.materialthemebuilder"
     id "io.sentry.android.gradle"
     id "org.jetbrains.kotlin.plugin.serialization" version "2.2.20"
@@ -118,13 +117,6 @@ spotless {
         indentWithSpaces()
         endWithNewline()
     }
-}
-
-autoResConfig {
-    generatedClassFullName = "af.shizuku.manager.ShizukuLocales"
-    generateRes = false
-    generatedArrayFirstItem = "SYSTEM"
-    generateLocaleConfig = true
 }
 
 materialThemeBuilder {

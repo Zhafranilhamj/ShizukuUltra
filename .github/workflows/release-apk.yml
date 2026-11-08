@@ -119,8 +119,10 @@ jobs:
           chmod +x pre-push-guard/scripts/pre_push_check.sh
           bash pre-push-guard/scripts/pre_push_check.sh
 
-      - name: Check translation arrays
-        run: python3 scripts/i18n/check_arrays.py
+      - name: Check translation arrays and generated locale list
+        run: |
+          python3 scripts/i18n/check_arrays.py
+          python3 scripts/i18n/generate_locales.py --check
 
       - name: Create signing.properties
         id: keystore

@@ -55,8 +55,10 @@ jobs:
       # Translated *_value/_values arrays silently break settings in that language; the
       # pre-push hook runs this too, but the hook is easy to bypass (and AI agents push with
       # --no-verify), so CI is the enforcement point.
-      - name: Check translation arrays
-        run: python3 scripts/i18n/check_arrays.py
+      - name: Check translation arrays and generated locale list
+        run: |
+          python3 scripts/i18n/check_arrays.py
+          python3 scripts/i18n/generate_locales.py --check
 
       - name: Run Lint
         run: ./gradlew :manager:lint

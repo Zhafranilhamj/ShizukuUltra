@@ -79,8 +79,10 @@ jobs:
           chmod +x pre-push-guard/scripts/pre_push_check.sh
           bash pre-push-guard/scripts/pre_push_check.sh
 
-      - name: Translation arrays
-        run: python3 scripts/i18n/check_arrays.py
+      - name: Translation arrays and generated locale list
+        run: |
+          python3 scripts/i18n/check_arrays.py
+          python3 scripts/i18n/generate_locales.py --check
 
       - name: XML well-formedness
         run: |
