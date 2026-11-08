@@ -148,10 +148,13 @@ def generateThemeRes = tasks.register("generateThemeRes", Exec) {
 // "You cannot add Provider instances to the Android SourceSet API" - so resolve it eagerly.
 android.sourceSets.main.res.srcDir(generatedThemeResDir.get().asFile.absolutePath)
 tasks.configureEach { task ->
-    // Everything that reads resources must wait for the generator.
-    if (task.name.startsWith("merge") && task.name.contains("Resources")
-            || task.name.startsWith("process") && task.name.endsWith("Resources")
-            || task.name.startsWith("generate") && task.name.endsWith("Resources")) {
+    // Every task in this project has to see the resources generated above. Depending on the
+    // generator is the cheapest correct answer: Gradle validates that no task reads another task's
+    // output without a declared dependency ("Property has implicit dependency" on
+    // :manager:map<Variant>SourceSetPaths was the first one), and the set of resource readers is
+    // not stable across AGP versions. The generator itself does no project work, so this cannot
+    // create a cycle, and javac only runs once per build.
+    if (task.name != "generateThemeRes") {
         task.dependsOn(generateThemeRes)
     }
 }
