@@ -52,8 +52,30 @@ jobs:
       - name: Verify Code Formatting
         run: ./gradlew spotlessCheck
 
+      # Translated *_value/_values arrays silently break settings in that language; the
+      # pre-push hook runs this too, but the hook is easy to bypass (and AI agents push with
+      # --no-verify), so CI is the enforcement point.
+      - name: Check translation arrays
+        run: python3 scripts/i18n/check_arrays.py
+
       - name: Run Lint
         run: ./gradlew :manager:lint
+
+      # Same suites as the unit-tests job in app.yml. Running them on the PR (not only after the
+      # merge) is the point: a broken test used to land on master and only fail there, after the
+      # release build had already started.
+      - name: Run unit tests
+        run: ./gradlew --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest :database:testDebugUnitTest
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-unit-test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          retention-days: 7
 
       - name: Build Debug APK
         run: ./gradlew :manager:assembleDebug

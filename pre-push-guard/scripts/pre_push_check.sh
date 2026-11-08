@@ -436,6 +436,27 @@ else
     echo -e "${COLOR_GREEN}PASS${COLOR_RESET}"
 fi
 
+# 27. Translation array integrity - a translated *_value/*_values array silently breaks that
+# language's settings, because the code compares the stored item against an internal key
+# ("open_app", "stable", ...). A label array of a different length than English shifts every label
+# onto the wrong value. Both only surface on a device set to that language, so gate them here.
+step "Checking translation arrays (scripts/i18n/check_arrays.py)"
+if ! command -v python3 >/dev/null 2>&1; then
+    echo -e "${COLOR_YELLOW}SKIP${COLOR_RESET} (python3 not found)"
+elif [ ! -f scripts/i18n/check_arrays.py ]; then
+    echo -e "${COLOR_RED}FAIL${COLOR_RESET} (scripts/i18n/check_arrays.py is missing)"
+    ERRORS=$((ERRORS + 1))
+else
+    ARRAY_FAIL=$(python3 scripts/i18n/check_arrays.py 2>&1)
+    if [ $? -ne 0 ]; then
+        echo -e "${COLOR_RED}FAIL${COLOR_RESET} (translated value arrays or drifted label arrays)"
+        echo "$ARRAY_FAIL"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo -e "${COLOR_GREEN}PASS${COLOR_RESET}"
+    fi
+fi
+
 # 17. Dry-Run Build Validation
 step "Validating Gradle build configuration (dry-run)"
 if [ -n "${SKIP_GRADLE_CHECK:-}" ]; then
