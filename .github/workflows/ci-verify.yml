@@ -53,25 +53,26 @@ jobs:
           # failures only ever said "exit code 1". Turn -e off and handle the status explicitly.
           set +e
           set -o pipefail
-          # Job logs are served from external blob storage and are not always readable, so the
-          # useful part of a failed build is re-emitted as annotations: the error lines without
-          # Java stack frames, then the last few lines for context.
-          report_log() {
-            local f="$1" title="$2"
-            grep -vE '^\s+at |^\s+\.\.\. [0-9]+ (more|common frames)' "$f" \
-              | grep -E 'FAILED|^e: |^w: |error:|What went wrong|Caused by|Execution failed|Could not|Unresolved|signature|required:|incompatible|> Task ' \
-              | head -40 | while IFS= read -r l; do echo "::error title=${title}::$l"; done
-            tail -10 "$f" | while IFS= read -r l; do echo "::error title=${title}-tail::$l"; done
+          # Job logs are served from external blob storage and cannot always be read back, so the
+          # failing part of a Gradle log is re-emitted as annotations. Only the block after
+          # "FAILURE:"/"What went wrong" (or the tail when there is none) is reported: GitHub caps
+          # the annotations per check run, and earlier versions spent that budget on unrelated
+          # lines, hiding the real error.
+          report_gradle() {
+            local f="$1" title="$2" start
+            start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
+            if [ -n "$start" ]; then
+              sed -n "${start},$((start + 24))p" "$f"
+            else
+              tail -25 "$f"
+            fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
           ./gradlew help --stacktrace --no-daemon 2>&1 | tee config.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
             # Annotate the tail unconditionally: a Gradle configuration failure does not always
             # match a fixed set of patterns, and the raw log is not always readable back.
-            # Settings/Build script compile errors appear in the first lines and do not match the
-            # error patterns, so always emit the head of a failed configuration log too.
-            head -25 config.log | while IFS= read -r l; do echo "::error title=Configuration-head::$l"; done
-            report_log config.log Configuration
+            report_gradle config.log Configuration
             exit "$rc"
           fi
 
@@ -110,15 +111,19 @@ jobs:
           # failures only ever said "exit code 1". Turn -e off and handle the status explicitly.
           set +e
           set -o pipefail
-          # Job logs are served from external blob storage and are not always readable, so the
-          # useful part of a failed build is re-emitted as annotations: the error lines without
-          # Java stack frames, then the last few lines for context.
-          report_log() {
-            local f="$1" title="$2"
-            grep -vE '^\s+at |^\s+\.\.\. [0-9]+ (more|common frames)' "$f" \
-              | grep -E 'FAILED|^e: |^w: |error:|What went wrong|Caused by|Execution failed|Could not|Unresolved|signature|required:|incompatible|> Task ' \
-              | head -40 | while IFS= read -r l; do echo "::error title=${title}::$l"; done
-            tail -10 "$f" | while IFS= read -r l; do echo "::error title=${title}-tail::$l"; done
+          # Job logs are served from external blob storage and cannot always be read back, so the
+          # failing part of a Gradle log is re-emitted as annotations. Only the block after
+          # "FAILURE:"/"What went wrong" (or the tail when there is none) is reported: GitHub caps
+          # the annotations per check run, and earlier versions spent that budget on unrelated
+          # lines, hiding the real error.
+          report_gradle() {
+            local f="$1" title="$2" start
+            start=$(grep -n -m1 -E '^\* What went wrong:|^FAILURE:' "$f" | head -1 | cut -d: -f1)
+            if [ -n "$start" ]; then
+              sed -n "${start},$((start + 24))p" "$f"
+            else
+              tail -25 "$f"
+            fi | grep -vE '^\s+at ' | while IFS= read -r l; do echo "::error title=${title}::$l"; done
           }
           ./gradlew --continue :manager:testShizukuplusDebugUnitTest :server:testDebugUnitTest \
             :database:testDebugUnitTest --stacktrace 2>&1 | tee test.log
@@ -135,7 +140,7 @@ jobs:
               awk '/FAILED/{flag=1} flag' test.log | head -80
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            report_log test.log Test
+            report_gradle test.log Test
             exit "$rc"
           fi
 
