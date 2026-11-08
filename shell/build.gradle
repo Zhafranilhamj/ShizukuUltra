@@ -49,13 +49,18 @@ def bundleShellArtifacts = { String buildType, boolean minified ->
                 new File(mappingDir, "cmd-v${rootProject.ext.versionName}.txt").path)
         }
     }
+    // Arrays have no isEmpty() in Groovy; compare lengths.
     def apks = (apkDir.listFiles({ File f -> f.isFile() && f.name.endsWith(".apk") } as FileFilter)
-        ?: [] as File[]).sort { it.lastModified() }
-    if (apks.isEmpty()) {
+        ?: new File[0]).sort { it.lastModified() }
+    if (apks.length == 0) {
         throw new GradleException("no APK found in ${apkDir}; cannot bundle rish_shizuku.dex")
     }
     def apk = apks.last()
-    def dex = zipTree(apk).matching { include "classes*.dex" }.files.sort { it.name }.first()
+    def dexFiles = zipTree(apk).matching { include "classes*.dex" }.files.sort { it.name }
+    if (dexFiles.length == 0) {
+        throw new GradleException("${apk} contains no classes*.dex")
+    }
+    def dex = dexFiles[0]
     dexPath.mkdirs()
     new File(dexPath, "rish_shizuku.dex").bytes = dex.bytes
 }
