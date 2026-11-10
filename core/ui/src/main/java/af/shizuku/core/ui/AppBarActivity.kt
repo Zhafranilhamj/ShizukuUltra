@@ -74,7 +74,8 @@ abstract class AppBarActivity : AppActivity() {
                 val prefs = createDeviceProtectedStorageContext()
                     .getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
                 if (prefs.getBoolean("blur_ui_enabled", false) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    container.background?.mutate()?.alpha = 230 // ~90% opacity
+                    // Liquid Glass: more translucent app bar so the frosted blur shows through.
+                    container.background?.mutate()?.alpha = 200 // ~78% opacity
                 }
             } else {
                 Timber.tag("AppBarActivity").w("Toolbar or container not found in layout.")

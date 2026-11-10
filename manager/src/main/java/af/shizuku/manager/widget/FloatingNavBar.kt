@@ -630,10 +630,11 @@ object FloatingNavBar : Application.ActivityLifecycleCallbacks {
             return false
         }
         return runCatching {
+            // Liquid Glass: stronger blur radius (32px ≈ ~20dp) for a more pronounced frosted look.
             blurView
                 .setupWith(target)
                 .setFrameClearDrawable(activity.window.decorView.background)
-                .setBlurRadius(24f)
+                .setBlurRadius(32f)
             blurView.setBlurEnabled(true)
             true
         }.getOrElse {

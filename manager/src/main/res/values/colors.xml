@@ -26,4 +26,14 @@
     <color name="system_accent2_600">#5E5E5E</color>
     <color name="system_accent3_600">#7D5260</color>
     <color name="system_accent1_400">#D0BCFF</color>
+
+    <!-- Liquid Glass color tokens (light mode defaults; values-night/colors.xml overrides for dark).
+         Bright white-tinged translucency with a faint highlight so the control reads as polished
+         glass sitting on top of content rather than a filled card. -->
+    <color name="glass_surface">#B3FFFFFF</color>
+    <color name="glass_stroke">#26000000</color>
+    <color name="glass_chip_surface">#CCFFFFFF</color>
+    <color name="glass_chip_stroke">#1A000000</color>
+    <color name="glass_nav_surface">#D9FFFFFF</color>
+    <color name="glass_appbar_surface">#E6FFFFFF</color>
 </resources>

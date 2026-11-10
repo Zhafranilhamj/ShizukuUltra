@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Optional floating navigation bar (#498). Added to an activity's content root by
      FloatingNavBar, never inflated from an activity layout, so it can't affect the
-     AppBarActivity/getLayoutId rules. A rounded translucent card around a stock
+     AppBarActivity/getLayoutId rules. A rounded translucent glass card around a stock
      BottomNavigationView keeps the pill indicator, 48dp+ touch targets and TalkBack semantics.
      itemGravity="center": FloatingNavBar sets the bar's height (64/80dp), and items keep their
      default top gravity otherwise, so icons sat high in the bar, most visibly with labels off or
@@ -14,9 +14,9 @@
     android:layout_height="wrap_content"
     android:layout_gravity="bottom|center_horizontal"
     app:cardBackgroundColor="@color/floating_nav_surface"
-    app:cardElevation="6dp"
+    app:cardElevation="0dp"
     app:cardCornerRadius="32dp"
-    app:strokeColor="?attr/colorOutlineVariant"
+    app:strokeColor="?attr/glassStroke"
     app:strokeWidth="1dp">
 
     <!-- Real frosted glass when "Frosted glass effect" is on (API 31+, render-thread blur of the
@@ -26,19 +26,28 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <com.google.android.material.bottomnavigation.BottomNavigationView
-            android:id="@+id/floating_nav"
+        <!-- Glass specular highlight: a subtle top-edge white glow is rendered as a foreground
+             drawable on the BlurView, so it sits above the blurred content but below the nav items
+             (the BottomNavigationView draws after it). -->
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@android:color/transparent"
-            android:paddingHorizontal="6dp"
-            app:itemGravity="center"
-            app:itemPaddingTop="4dp"
-            app:itemPaddingBottom="4dp"
-            app:itemHorizontalTranslationEnabled="false"
-            app:elevation="0dp"
-            app:labelVisibilityMode="selected"
-            app:menu="@menu/floating_nav_menu" />
+            android:foreground="@drawable/bg_glass_nav_highlight">
+
+            <com.google.android.material.bottomnavigation.BottomNavigationView
+                android:id="@+id/floating_nav"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@android:color/transparent"
+                android:paddingHorizontal="6dp"
+                app:itemGravity="center"
+                app:itemPaddingTop="4dp"
+                app:itemPaddingBottom="4dp"
+                app:itemHorizontalTranslationEnabled="false"
+                app:elevation="0dp"
+                app:labelVisibilityMode="selected"
+                app:menu="@menu/floating_nav_menu" />
+        </FrameLayout>
 
     </eightbitlab.com.blurview.BlurView>
 

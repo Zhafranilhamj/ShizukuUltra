@@ -2,6 +2,14 @@
 <resources>
     <attr name="appColorPrimary" format="reference" />
 
+    <!-- Liquid Glass surface tokens (M3E + Liquid Glass overhaul) -->
+    <attr name="glassSurface" format="color|reference" />
+    <attr name="glassStroke" format="color|reference" />
+    <attr name="glassChipSurface" format="color|reference" />
+    <attr name="glassChipStroke" format="color|reference" />
+    <attr name="glassNavSurface" format="color|reference" />
+    <attr name="glassAppBarSurface" format="color|reference" />
+
     <!-- EmptyStateView custom attributes -->
     <attr name="emptyIcon" format="reference" />
     <attr name="emptyTitle" format="reference" />

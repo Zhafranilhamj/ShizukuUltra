@@ -6,9 +6,13 @@
     android:id="@+id/toolbar_container"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="?android:attr/colorBackground"
+    android:background="@android:color/transparent"
     app:elevation="0dp"
     app:liftOnScroll="true">
+
+    <!-- Frosted-glass effect is applied at runtime in AppBarActivity.onPostCreate: when
+         blur_ui_enabled is on (API 31+), the AppBarLayout's background is made translucent so
+         the window's setBackgroundBlurRadius shows through. -->
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
@@ -16,7 +20,7 @@
         android:layout_height="wrap_content"
         android:minHeight="?attr/actionBarSize"
         app:layout_scrollFlags="scroll|enterAlways|snap"
-        app:titleTextAppearance="@style/TextAppearance.Material3.TitleLarge"
+        app:titleTextAppearance="@style/TextAppearance.Material3.TitleLarge.Emphasized"
         tools:title="Title" />
 
 </com.google.android.material.appbar.AppBarLayout>
