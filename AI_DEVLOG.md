@@ -13,7 +13,7 @@ prevents re-introducing fixed bugs, and keeps the roadmap visible without user s
 - Centralized the local-network permission's diagnostic label and made permission-check exceptions fail closed.
 - Added concise user-facing release notes and changed the release workflow to use them instead of stale unrelated UI-overhaul notes.
 - Not completed in this pass: Android 16/17 SU Bridge export-directory fallback, Theme Preview UI, Pixel-specific repair actions, full `ShizukuService` Kotlin migration, emulator Magic Setup workflow validation, and APK workflow execution. These need separate implementation/testing and should not be described as shipped.
-- Validation/build/release are pending; do not treat the changes as a verified production APK until the Android build and signed workflow complete.
+- GitHub Release APK workflow completed successfully for source commit `2818092d7f0d927cdbf48d2057d7c0df8684dadb`: generated version `14.0.0.r3322` and published prerelease `v14.0.0.r3322-fork.62` with Shizuku+, Drop-In, and Compat Hub APKs. Gradle configuration, static checks, translations, signing setup, release builds, APK verification/upload, and release publication all passed. No emulator/device runtime tests were run; the larger deferred items above remain unfinished.
 
 ## Open Backlog (unfinished / planned)
 
