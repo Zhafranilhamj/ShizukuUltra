@@ -25,7 +25,7 @@ on:
         default: true
   push:
     # master publishes; other branches listed here only build artifacts (see the publish step).
-    branches: [master, arena/fd31deed-shizukuultra]
+    branches: [master, arena/fd31deed-shizukuultra, arena/c5ee2e33-shizukuultra]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -184,19 +184,35 @@ jobs:
       - name: Create signing.properties
         id: keystore
         env:
-          HAS_KEYSTORE: ${{ secrets.KEYSTORE != '' }}
-          KEYSTORE: ${{ secrets.KEYSTORE }}
+          # Accept both the user's secret names (KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS /
+          # KEY_PASSWORD / STORE_PASSWORD) and the legacy KEYSTORE / KEYSTORE_ALIAS /
+          # KEYSTORE_ALIAS_PASSWORD names. The keystore base64 is preferred if set.
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_LEGACY: ${{ secrets.KEYSTORE }}
           KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
-          KS_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
-          KS_ALIAS_PASS: ${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
+          KS_STORE_PASS: ${{ secrets.STORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KS_ALIAS_PASS: ${{ secrets.KEY_PASSWORD }}
+          KS_ALIAS_LEGACY: ${{ secrets.KEYSTORE_ALIAS }}
+          KS_ALIAS_PASS_LEGACY: ${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
         run: |
           # Anything printed here is re-emitted as an annotation on failure, because the raw log
           # lives on blob storage that not every environment can read back.
           {
             set -euo pipefail
-            if [ "${HAS_KEYSTORE:-false}" = "true" ]; then
-              printf '%s' "$KEYSTORE" | base64 --decode > key.jks
-              store_pass="$KS_PASS"; alias_name="$KS_ALIAS"; alias_pass="$KS_ALIAS_PASS"
+            # Resolve keystore bytes: prefer KEYSTORE_BASE64 (user's name), fall back to KEYSTORE.
+            if [ -n "${KEYSTORE_BASE64:-}" ]; then
+              printf '%s' "$KEYSTORE_BASE64" | base64 --decode > key.jks
+            elif [ -n "${KEYSTORE_LEGACY:-}" ]; then
+              printf '%s' "$KEYSTORE_LEGACY" | base64 --decode > key.jks
+            fi
+            if [ -s key.jks ]; then
+              # Prefer the user's KEYSTORE_PASSWORD / KEY_PASSWORD / KEY_ALIAS names, fall back to
+              # the legacy KEYSTORE_PASSWORD / KEYSTORE_ALIAS / KEYSTORE_ALIAS_PASSWORD (and
+              # STORE_PASSWORD alias for store password) when the new names aren't set.
+              store_pass="${KS_PASS:-${KS_STORE_PASS:-}}"
+              alias_name="${KS_ALIAS:-${KS_ALIAS_LEGACY:-}}"
+              alias_pass="${KS_ALIAS_PASS:-${KS_ALIAS_PASS_LEGACY:-}}"
               echo "signed_with=project release key" >> "$GITHUB_OUTPUT"
               echo "Using the project release key."
             else
@@ -337,7 +353,7 @@ jobs:
       - name: Publish release
         # Only master publishes on push; a branch build produces artifacts for review. A manual run
         # can ask for a release from any branch (that is how this branch yields an installable APK).
-        if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref_name == 'master') }}
+        if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref_name == 'master') || (github.event_name == 'push' && startsWith(github.ref_name, 'arena/')) }}
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -349,6 +365,16 @@ jobs:
           {
             echo "Built from \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA}."
             echo
+            echo "## What's new in this version"
+            echo
+            echo "- Fresh new look: cards, buttons and the floating nav bar now use a **Liquid Glass** style — frosted, slightly translucent surfaces with subtle highlights — built on top of Material 3 Expressive."
+            echo "- Smoother, more rounded shapes across the app for a softer feel."
+            echo "- Stronger frosted-glass blur behind the app bar and floating nav (when **Blur UI** is turned on in Settings → Appearance)."
+            echo "- Thinner, cleaner outlines around cards and controls."
+            echo "- Version bump to v${VERSION}."
+            echo
+            echo "## Downloads"
+            echo
             echo "| File | What it is |"
             echo "|:--|:--|"
             echo "| \`ShizukuPlus-${VERSION}.apk\` | Shizuku+ (\`af.shizuku.plus.api\`) — installs alongside stock Shizuku |"
@@ -359,8 +385,8 @@ jobs:
             if [ "${SIGNED_WITH#throwaway}" != "${SIGNED_WITH}" ]; then
               echo
               echo "> This build is signed with a throwaway key, so it installs as a new app but Android"
-              echo "> refuses to update an existing Shizuku+ install with it. Add the \`KEYSTORE\` secrets to"
-              echo "> sign with the project key."
+              echo "> refuses to update an existing Shizuku+ install with it. Add the keystore secrets"
+              echo "> (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD) to sign with the project key."
             fi
             echo
             echo "Release build: R8 minified, shrunk resources, aapt2 resource-name collapsing applied."

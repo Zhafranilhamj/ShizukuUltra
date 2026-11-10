@@ -133,7 +133,8 @@ abstract class AppActivity : MaterialActivity() {
             enableEdgeToEdge()
         }
         if (prefs.getBoolean("blur_ui_enabled", false) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            window.setBackgroundBlurRadius(30)
+            // Liquid Glass: stronger blur for a more pronounced frosted look across surfaces.
+            window.setBackgroundBlurRadius(40)
         }
         super.onCreate(savedInstanceState)
         // Theme-change flash fix: immediately replace the new theme's android:windowBackground with

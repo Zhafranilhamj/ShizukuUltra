@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Liquid Glass surface: a frosted/translucent surface tone tuned for dark & light themes via theme
+  attributes. Uses a rounded rectangle with a thin specular highlight stroke (top-light) so the
+  control reads as glass sitting on top of content rather than a filled card.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="32dp" />
+    <solid android:color="@color/glass_surface" />
+    <stroke
+        android:width="1dp"
+        android:color="@color/glass_stroke" />
+</shape>

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Frosted look: the theme's high surface container at ~90% so content shows faintly through. -->
+<!-- Liquid Glass floating nav surface: slightly translucent surface with a faint specular highlight,
+     letting content show through when the BlurView behind is enabled. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:alpha="0.92" android:color="?attr/colorSurfaceContainerHigh" />
+    <item android:alpha="0.90" android:color="@color/glass_nav_surface" />
 </selector>

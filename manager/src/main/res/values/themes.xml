@@ -16,6 +16,18 @@
 
         <item name="appColorPrimary">@color/app_color_light</item>
 
+        <!-- Liquid Glass color tokens -->
+        <item name="glassSurface">@color/glass_surface</item>
+        <item name="glassStroke">@color/glass_stroke</item>
+        <item name="glassChipSurface">@color/glass_chip_surface</item>
+        <item name="glassChipStroke">@color/glass_chip_stroke</item>
+        <item name="glassNavSurface">@color/glass_nav_surface</item>
+        <item name="glassAppBarSurface">@color/glass_appbar_surface</item>
+
+        <!-- Refined M3 Expressive+Liquid Glass look: smoother elevation, softer corners -->
+        <item name="dialogCornerRadius">32dp</item>
+        <item name="materialCardViewStyle">@style/Widget.App.Card</item>
+
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
         <item name="windowActionBar">false</item>
@@ -40,8 +52,20 @@
 
         <item name="preferenceTheme">@style/AppTheme.PreferenceThemeOverlay</item>
         <item name="materialSwitchStyle">@style/Widget.App.MaterialSwitch</item>
-        
+
         <item name="appColorPrimary">@color/app_color_dark</item>
+
+        <!-- Liquid Glass color tokens (dark) -->
+        <item name="glassSurface">@color/glass_surface</item>
+        <item name="glassStroke">@color/glass_stroke</item>
+        <item name="glassChipSurface">@color/glass_chip_surface</item>
+        <item name="glassChipStroke">@color/glass_chip_stroke</item>
+        <item name="glassNavSurface">@color/glass_nav_surface</item>
+        <item name="glassAppBarSurface">@color/glass_appbar_surface</item>
+
+        <!-- Refined M3 Expressive+Liquid Glass look: smoother elevation, softer corners -->
+        <item name="dialogCornerRadius">32dp</item>
+        <item name="materialCardViewStyle">@style/Widget.App.Card</item>
 
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
@@ -70,7 +94,7 @@
         <item name="layout">@layout/m3_preference</item>
         <item name="iconSpaceReserved">false</item>
     </style>
-    
+
     <style name="Preference.Category.M3Expressive" parent="@style/Preference.Category.Material">
         <item name="allowDividerAbove">true</item>
         <item name="allowDividerBelow">false</item>

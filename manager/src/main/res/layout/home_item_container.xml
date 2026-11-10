@@ -7,17 +7,28 @@
     android:clickable="true"
     android:focusable="true"
     android:descendantFocusability="afterDescendants"
-    app:cardBackgroundColor="?colorSurfaceContainerHigh"
+    app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
     app:cardElevation="0dp"
-    app:strokeWidth="0dp"
+    app:strokeWidth="0.5dp"
+    app:strokeColor="?attr/colorOutlineVariant"
     app:shapeAppearanceOverlay="@style/ShapeAppearance.HomeCard.ExtraLarge">
 
-    <!-- Content frame: inner ViewHolder layouts inflate here -->
+    <!-- Subtle top-edge highlight that sells the glass look: a 1px white (light) / soft
+         near-white (dark) gradient overlay painted via foreground sits on top of the card
+         content. android:foreground lets the highlight cover the ripple without masking it,
+         because it's drawn after the content and before the ripple selector. -->
     <FrameLayout
-        android:id="@+id/card_content"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="@dimen/card_content_padding" />
+        android:layout_height="match_parent"
+        android:foreground="@drawable/bg_glass_card_highlight">
+
+        <!-- Content frame: inner ViewHolder layouts inflate here -->
+        <FrameLayout
+            android:id="@+id/card_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="@dimen/card_content_padding" />
+    </FrameLayout>
 
     <!-- Edit-mode controls: a single top-end row so the drag handle and remove button
          never stack/overlap each other regardless of card height (a full-height drag
