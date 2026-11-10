@@ -176,7 +176,7 @@ class ActivityLogFragment : Fragment() {
 
         val searchChip =
             com.google.android.material.chip.Chip(ctx).apply {
-                setText(if (appQuery.isBlank()) R.string.activity_log_search_hint else appQuery)
+                setText(if (appQuery.isBlank()) getString(R.string.activity_log_search_hint) else appQuery)
                 isCheckable = false
                 setOnClickListener { anchor ->
                     HapticUtils.tap(anchor)
@@ -196,7 +196,7 @@ class ActivityLogFragment : Fragment() {
                         .setPositiveButton(android.R.string.ok) { _, _ ->
                             appQuery = input.text?.toString().orEmpty().trim()
                             (anchor as? com.google.android.material.chip.Chip)?.setText(
-                                if (appQuery.isEmpty()) R.string.activity_log_search_hint else appQuery,
+                                if (appQuery.isEmpty()) getString(R.string.activity_log_search_hint) else appQuery,
                             )
                             applyFilterSort()
                         }
