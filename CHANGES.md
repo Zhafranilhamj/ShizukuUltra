@@ -90,6 +90,12 @@ which is itself a fork of [RikkaApps/Shizuku](https://github.com/RikkaApps/Shizu
 
 ---
 
+## 2026-11-10: Reliability and activity log improvements
+- Added activity-log search by app name or package name; existing activity-type filters can still be used at the same time.
+- Prevented Watchdog alarm deliveries from queuing repeated one-time repairs within five minutes, and changed duplicate pending repairs to be kept rather than replaced. The periodic backstop now avoids a repair during that cooldown.
+- Made local-network permission diagnostics use a label matching the permission selected for the Android version, and report failed permission checks as not granted.
+- Updated release notes to describe only changes actually included in the build.
+
 ## Server (`server/`)
 
 - Partial Kotlin migration: `ShizukuService.java` (1293 lines) remains primary implementation

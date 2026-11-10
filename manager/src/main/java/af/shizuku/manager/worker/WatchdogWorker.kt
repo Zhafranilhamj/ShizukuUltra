@@ -59,6 +59,11 @@ class WatchdogWorker(
         private const val WORK_NAME = "shizuku_watchdog_healer"
         private const val HEAL_WORK_NAME = "shizuku_watchdog_heal_once"
         private const val HEAL_NOTIFICATION_ID = 1003
+        private const val HEAL_PREFS = "watchdog_heal_coordination"
+        private const val LAST_HEAL_SCHEDULED_AT = "last_heal_scheduled_at"
+        private const val INPUT_ONE_TIME_HEAL = "one_time_heal"
+        private const val HEAL_COOLDOWN_MS = 5 * 60 * 1000L
+        private val healLock = Any()
 
         fun schedule(context: Context) {
             val constraints =
@@ -86,21 +91,49 @@ class WatchdogWorker(
          * running doWork(), so WatchdogService.start() is allowed even while the device is locked.
          */
         fun scheduleOneTimeHeal(context: Context) {
-            val request =
-                OneTimeWorkRequestBuilder<WatchdogWorker>()
-                    .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-                    .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                HEAL_WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
-                request,
-            )
+            // Alarm re-arms can be delivered near a periodic WorkManager run. Persist a short
+            // cooldown before enqueueing, and use KEEP so a pending/running heal is never replaced
+            // by another alarm. Both protections matter: the timestamp coordinates with the
+            // separate periodic work name; KEEP deduplicates alarm deliveries themselves.
+            synchronized(healLock) {
+                val prefs = context.getSharedPreferences(HEAL_PREFS, Context.MODE_PRIVATE)
+                val now = System.currentTimeMillis()
+                val lastScheduled = prefs.getLong(LAST_HEAL_SCHEDULED_AT, 0L)
+                if (now - lastScheduled in 0 until HEAL_COOLDOWN_MS) {
+                    Timber.tag("WatchdogWorker").d("A watchdog heal was scheduled recently; suppressing duplicate")
+                    return
+                }
+                if (!prefs.edit().putLong(LAST_HEAL_SCHEDULED_AT, now).commit()) {
+                    Timber.tag("WatchdogWorker").w("Could not persist watchdog heal cooldown; relying on unique work")
+                }
+
+                val request =
+                    OneTimeWorkRequestBuilder<WatchdogWorker>()
+                        .setInputData(workDataOf(INPUT_ONE_TIME_HEAL to true))
+                        .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                        .build()
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    HEAL_WORK_NAME,
+                    ExistingWorkPolicy.KEEP,
+                    request,
+                )
+            }
         }
     }
 
     override suspend fun doWork(): Result {
         if (!ShizukuSettings.getWatchdog()) {
             Timber.tag("WatchdogWorker").d("Watchdog is disabled in settings, skipping healing.")
+            return Result.success()
+        }
+
+        val isOneTimeHeal = inputData.getBoolean(INPUT_ONE_TIME_HEAL, false)
+        val lastHealScheduledAt =
+            applicationContext
+                .getSharedPreferences(HEAL_PREFS, Context.MODE_PRIVATE)
+                .getLong(LAST_HEAL_SCHEDULED_AT, 0L)
+        if (!isOneTimeHeal && System.currentTimeMillis() - lastHealScheduledAt in 0 until HEAL_COOLDOWN_MS) {
+            Timber.tag("WatchdogWorker").d("A one-time heal is already scheduled or was just attempted; skipping periodic duplicate")
             return Result.success()
         }
 

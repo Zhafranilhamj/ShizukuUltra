@@ -362,35 +362,9 @@ jobs:
         run: |
           set -euo pipefail
           TAG="v${VERSION}-fork.${GITHUB_RUN_NUMBER}"
-          {
-            echo "Built from \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA}."
-            echo
-            echo "## What's new in this version"
-            echo
-            echo "- Fresh new look: cards, buttons and the floating nav bar now use a **Liquid Glass** style — frosted, slightly translucent surfaces with subtle highlights — built on top of Material 3 Expressive."
-            echo "- Smoother, more rounded shapes across the app for a softer feel."
-            echo "- Stronger frosted-glass blur behind the app bar and floating nav (when **Blur UI** is turned on in Settings → Appearance)."
-            echo "- Thinner, cleaner outlines around cards and controls."
-            echo "- Version bump to v${VERSION}."
-            echo
-            echo "## Downloads"
-            echo
-            echo "| File | What it is |"
-            echo "|:--|:--|"
-            echo "| \`ShizukuPlus-${VERSION}.apk\` | Shizuku+ (\`af.shizuku.plus.api\`) — installs alongside stock Shizuku |"
-            echo "| \`ShizukuPlus-DropIn-${VERSION}.apk\` | Drop-In flavor (\`moe.shizuku.privileged.api\`) — replaces stock Shizuku |"
-            echo "| \`ShizukuPlus-CompatHub-${VERSION}.apk\` | Compat Hub stub, bundles the Shizuku API for older clients |"
-            echo
-            echo "**Signing:** ${SIGNED_WITH}."
-            if [ "${SIGNED_WITH#throwaway}" != "${SIGNED_WITH}" ]; then
-              echo
-              echo "> This build is signed with a throwaway key, so it installs as a new app but Android"
-              echo "> refuses to update an existing Shizuku+ install with it. Add the keystore secrets"
-              echo "> (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD) to sign with the project key."
-            fi
-            echo
-            echo "Release build: R8 minified, shrunk resources, aapt2 resource-name collapsing applied."
-          } > notes.md
+          # Keep the release changelog focused on user-visible changes for this branch.
+          # APKs are attached separately; do not copy stale, unrelated release text here.
+          cp RELEASE_NOTES.md notes.md
           PRE=()
           [ "$PRERELEASE" = "true" ] && PRE=(--prerelease)
           gh release create "$TAG" dist/*.apk --title "Shizuku+ ${VERSION} (${GITHUB_REF_NAME})" \

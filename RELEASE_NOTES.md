@@ -1,0 +1,3 @@
+- You can now search activity history by app name or package name, while keeping the existing event-type filters.
+- Watchdog recovery now avoids scheduling repeated repair attempts within a short cooldown, reducing duplicate restarts and unnecessary background work.
+- Local network diagnostics now show the permission name for the Android version in use and no longer treat a failed permission check as permission granted.

@@ -56,6 +56,7 @@ class ActivityLogFragment : Fragment() {
     private lateinit var emptyStateView: EmptyStateView
     private var allRecords: List<ActivityLogRecord> = emptyList()
     private val selectedTypes = mutableSetOf<ActivityEventType>()
+    private var appQuery = ""
     private var sort = Sort.NEWEST
     private var stackRepetitive = true
     private val expandedGroupIds = mutableSetOf<String>()
@@ -65,7 +66,13 @@ class ActivityLogFragment : Fragment() {
         "${record.packageName}|${record.eventType}|${record.action}"
 
     private fun applyFilterSort() {
-        val filtered = allRecords.filter { selectedTypes.isEmpty() || it.eventType in selectedTypes }
+        val query = appQuery.trim().lowercase(Locale.ROOT)
+        val filtered =
+            allRecords.filter { record ->
+                (selectedTypes.isEmpty() || record.eventType in selectedTypes) &&
+                    (query.isEmpty() || record.packageName.lowercase(Locale.ROOT).contains(query) ||
+                        record.appName.lowercase(Locale.ROOT).contains(query))
+            }
 
         val groups: List<LogDisplayGroup> =
             if (stackRepetitive) {
@@ -166,6 +173,37 @@ class ActivityLogFragment : Fragment() {
                 }
             }
         group.addView(sortChip)
+
+        val searchChip =
+            com.google.android.material.chip.Chip(ctx).apply {
+                setText(if (appQuery.isBlank()) R.string.activity_log_search_hint else appQuery)
+                isCheckable = false
+                setOnClickListener { anchor ->
+                    HapticUtils.tap(anchor)
+                    val input = android.widget.EditText(ctx).apply {
+                        setSingleLine(true)
+                        inputType = android.text.InputType.TYPE_CLASS_TEXT
+                        hint = getString(R.string.activity_log_search_hint)
+                        setText(appQuery)
+                        setSelection(text.length)
+                        val inset = (24 * d).toInt()
+                        setPadding(inset, (8 * d).toInt(), inset, (8 * d).toInt())
+                    }
+                    com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+                        .setTitle(R.string.activity_log_search_hint)
+                        .setView(input)
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setPositiveButton(android.R.string.ok) { _, _ ->
+                            appQuery = input.text?.toString().orEmpty().trim()
+                            (anchor as? com.google.android.material.chip.Chip)?.setText(
+                                if (appQuery.isEmpty()) R.string.activity_log_search_hint else appQuery,
+                            )
+                            applyFilterSort()
+                        }
+                        .show()
+                }
+            }
+        group.addView(searchChip)
 
         val stackChip =
             com.google.android.material.chip.Chip(ctx).apply {

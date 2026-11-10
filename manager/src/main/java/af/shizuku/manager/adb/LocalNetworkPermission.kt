@@ -22,7 +22,7 @@ object LocalNetworkPermission {
 
     const val REQUEST_CODE = 0x10CA1 // "LOCAl" network
 
-    /** The single runtime permission that gates local-network / mDNS access on this OS, or null. */
+    /** The runtime permission used by this OS to gate local-network / mDNS access, or null. */
     fun required(): String? =
         when {
             Build.VERSION.SDK_INT >= 37 -> ACCESS_LOCAL_NETWORK
@@ -30,12 +30,24 @@ object LocalNetworkPermission {
             else -> null
         }
 
+    /** Short permission label used in diagnostics; kept in sync with [required]. */
+    fun requiredLabel(): String? =
+        when (required()) {
+            ACCESS_LOCAL_NETWORK -> "ACCESS_LOCAL_NETWORK"
+            Manifest.permission.NEARBY_WIFI_DEVICES -> "NEARBY_WIFI_DEVICES"
+            else -> null
+        }
+
     fun granted(context: Context): Boolean {
         val permission = required() ?: return true
         return try {
             context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
-        } catch (_: Throwable) {
-            true
+        } catch (_: SecurityException) {
+            // A failed check must never be treated as a grant: that would hide the exact
+            // diagnostic that helps the user repair wireless debugging on a newer platform.
+            false
+        } catch (_: RuntimeException) {
+            false
         }
     }
 

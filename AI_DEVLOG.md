@@ -6,6 +6,15 @@ prevents re-introducing fixed bugs, and keeps the roadmap visible without user s
 
 ---
 
+## 2026-11-10 session update (branch `arena/ce59e2a6-shizukuultra`)
+
+- Added app-name/package-name search to the Activity Log; it composes with the existing event-type filters.
+- Coordinated Watchdog alarm one-shot healing with the periodic worker using a five-minute persisted cooldown and unique-work `KEEP` semantics.
+- Centralized the local-network permission's diagnostic label and made permission-check exceptions fail closed.
+- Added concise user-facing release notes and changed the release workflow to use them instead of stale unrelated UI-overhaul notes.
+- Not completed in this pass: Android 16/17 SU Bridge export-directory fallback, Theme Preview UI, Pixel-specific repair actions, full `ShizukuService` Kotlin migration, emulator Magic Setup workflow validation, and APK workflow execution. These need separate implementation/testing and should not be described as shipped.
+- Validation/build/release are pending; do not treat the changes as a verified production APK until the Android build and signed workflow complete.
+
 ## Open Backlog (unfinished / planned)
 
 Items carried forward from previous sessions that have not yet been committed.

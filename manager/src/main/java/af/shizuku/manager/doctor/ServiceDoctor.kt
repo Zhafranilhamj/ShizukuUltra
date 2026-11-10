@@ -131,7 +131,7 @@ object ServiceDoctor {
             // 2b. Local Network Permission (Android 16+ / 17+)
             if (Build.VERSION.SDK_INT >= 36) {
                 val lnpGranted = LocalNetworkPermission.granted(context)
-                val lnpPermName = if (Build.VERSION.SDK_INT >= 37) "ACCESS_LOCAL_NETWORK" else "NEARBY_WIFI_DEVICES"
+                val lnpPermName = LocalNetworkPermission.requiredLabel() ?: "local network permission"
                 val canAutoGrantLnp = !lnpGranted && DeviceOptimizer.hasPrivilegedShell()
                 checks.add(
                     CheckItem(
