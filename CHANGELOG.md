@@ -4,6 +4,13 @@ All notable changes to ShizukuPlus are documented here. See [AI_ATTRIBUTIONS.md]
 
 ## [Unreleased]
 
+### ✨ UI Overhaul — Material 3 Expressive + Liquid Glass (v14.0.0)
+- **Fresh new look across the whole app**: cards, buttons, the floating navigation bar and the app bar now use a **Liquid Glass** style — frosted, slightly translucent surfaces with subtle top-edge highlights — layered on top of Material 3 Expressive.
+- Softer, more rounded shapes for cards and controls; pill-shaped action buttons (20dp corners).
+- Stronger frosted-glass blur behind the app bar and floating nav (when **Blur UI** is turned on in Settings → Appearance).
+- Thinner, cleaner outlines around cards, chips, dialogs and edit controls.
+- Emphasized title typography on the toolbar for a more expressive M3E feel.
+
 ### ✨ Features
 - **Choose what Service Doctor fixes** — "Adaptive Auto-Repair" now lists the repairs it would run, each with a checkbox. Repairs you uncheck are remembered, and background self-healing skips them too.
 - **Service Doctor repairs the most common start failures** — when port discovery keeps timing out, it offers to turn on TCP mode. When the ADB key can't be read, or the "Allow USB debugging" prompt keeps going unanswered, it offers a fresh ADB key ([#656](https://github.com/thejaustin/ShizukuPlus/issues/656)).
